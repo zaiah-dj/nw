@@ -11,11 +11,11 @@ Libraries like libevent and libuv will outperform nw on raw speed, but nw aims t
 simpler to use than libevent or libuv by adhering to some simple goals.
 
 <ul>
-- Be useful with two files (nw.c and nw.h), one object (nw.o)
-- Be single threaded
-- Do not try to run on every Unix known to man
-- Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)
-- Focus on the network (UDP and TCP, not really worried about IPC)
+<li>Be useful with two files (nw.c and nw.h), one object (nw.o)</li>
+<li>Be single threaded</li>
+<li>Do not try to run on every Unix known to man</li>
+<li>Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)</li>
+<li>Focus on the network (UDP and TCP, not really worried about IPC)</li>
 </ul>
 
 
