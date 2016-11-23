@@ -1,0 +1,50 @@
+Wed Nov 23 13:20:43 EST 2016
+	- Bug occurred in handle() #define.  Was referencing the wrong structure and when failures occurred, the program would crash.
+		Fixed.
+	- Added some minor documentation in nw.h about how to use this thing.
+	- TODO: Write additional tests (specifically, network load tests that don't rely on any shell scripting, they work but I always
+		lose them and they are always junky)
+	- TODO: Get rid of lite dependency by: 
+			using regular Unix socket calls OR 
+			embedding the lite Socket functions directly within nw.
+	- TODO: Document how to set up Executor tables.  They are the real power of nw.
+
+Tue Oct 18 02:37:02 EDT 2016
+	 -Added an ERRORS file to describe how to simulate errno codes for testing.
+
+Mon Oct 17 16:51:53 EDT 2016
+	 -Added lots of compile flags to better suit nw for different types of builds.
+	 -Initializing local userdata is much easier now, but it is a little hackish.  Please see initialize_selector() for more details.
+	 -Changed common names, such as executors -> errors and rwp -> runners.a
+	 -Deprecated read() and write() functions and now using function pointer table to choose a streaming method.  read() and write() are still used, but can be abstracted to more easily deal with different data types.
+	 -Still have not implemented signals.
+	 -May need to come up with a way to make the Selector datatype globally accessible.
+	 -Added BEATDOWN_MODE.  This gives the server the ability to process a certain number of requests and stop.
+	 -Also added plumbing for an alternate sort of data allocation.   The Recvr and Selector structures will probably be using arrays to denote the read and write ends of a file.   It's mostly semantic, but should save on typing.
+
+Sun Oct 16 12:16:40 EDT 2016
+	 -Fixed a few errors in nw.  Was sending WAY too much data when trying to ship packets via write().
+	 -Added reset_recvr() to ameliorate tearing down sockets.   It does not close the file descriptor, it just wipes buffers and resets any counts.
+	 -Moved around data structures and defines to make the code easier to parse.a
+	 -Added reset_recvr() before handlers on all error codes (I'm probably going to get rid of this,  it makes little sense...)
+	 -(specifically because the handler should be in control of ALL of that)
+	 -Added an event handler for accept().  It's there, but has to be enabled.   This should help block bullshit requests before they even make it to the processing step.  
+
+Tue Oct  4 00:04:24 EDT 2016
+	 -Time to stop this project.   Let's do something more modern.
+
+Thu Sep 29 17:17:51 EDT 2016
+	 -Finished getting basic reads and writes to work.  Have not yet tried retries.
+	 -Also noticed some things that a user may ALWAYS want to do: specifically, use memset or some other means to reset the Recvr structure.   If data is kept there, it will throw off subsequent reads and writes (and you'll probably get garbage data or worse, segfault)
+	 -Added many useful macros, especially NW_CALL which let's me follow the progression of "important" code by printing it's position and the branch that is being executed. It can be def'd out by leaving -DNW_FOLLOW off of the gcc flags.
+	 -I overlooked the nuances of the handle() macro.   I originally only handled failures with this macro, but this didn't work for read, write and process handlers.   uhandle handles callbacks for both failures and successes.  It also uses a different Executor table (please see nw.h for more info on this structure)
+	 -Version up (0.2)
+
+Thu Sep 29 02:15:22 EDT 2016
+	 -Got through most of the server loop.  Running into some issues with pollfd strucutre references at _write in main.c
+
+Sun Sep 25 14:40:52 EDT 2016
+	 -Hey, here's something new
+
+Sun Sep 25 14:38:51 EDT 2016
+	 -I added a change, lookit me, ma!
