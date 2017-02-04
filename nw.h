@@ -16,70 +16,13 @@
 	-----
 	Using nw is pretty simple as the backend
 	to your server application is pretty 
-	simple.  Unfortunately, I only have
-	directions for C right now, as I have
-	not had time to test with C++.
+	simple:
 
-	1. Declare and define a socket 
-	*C:
-	Socket sk   = { 
-		.server   = 1,         // 'True' means we want a server
-		.proto    = "tcp"      // Select TCP, not UDP or IPC
-		.port     = [0-65535]  // Choose a port
-		.hostname = "localhost"// Choose a hostname
-	};
-
-	2. Open a socket and bind and listen if successful
-	*C:	
-	//Notice how we can chain these together
-	if ( !socket_open(&sock) || !socket_bind(&sock) || !socket_listen(&sock) )
-		return socket_error(&sock);  
-
-	3. Check and initialize the socket structure
-	*C:
-	if (!initialize_selector(&sel, &sock)) //&l, local_index))
-		return nw_err(&sel);
-
-	4. Start a non-blocking server loop
-	*C:
-	if (!activate_selector(&sel))
-		return nw_err(&sel);
-
-	5. Test that all is well.
-	Our application is not doing anything useful at the moment.  It is just an
-	open drain waiting for water. (Or more technically speaking, an open wire
-	waiting for digits.)  Running the following should let you see how it
-	works and test that non-blocking sockets are working as they should.
-	
-	for n in `seq 1 10`; do
-		curl http://localhost:2000 &
-	done
-
-	6. Define actions.
-	Now we can define "actions" for our application to take at certain points
-	in the request-response chain.  nw breaks this chain into 4 steps:
-
-	NW_AT_READ      - The stage immediately after nw reads a 
-                    message from a client
-	NW_AT_PROC      - An optional intermediate stage that nw
-							      reaches after successfully reading a 
-                    client's message.  Assumes that no 
-                    further reading is needed.
-  NW_AT_WRITE     - Stage in which message has been sent
-                    from server.  If the message were 
-                    extremely large, one could optionally
-                    send the rest of the message to the
-                    client from this stage.
-	NW_AT_COMPLETED - The message is assumed to be done
-                    at this point.  You can close the
-                    file descriptor or keep it open if
-                    a protocol like WebSockets is being
-                    used and you would like to send more 
-                    data. 
+	1. open a socket 
 
 	Defines
 	-------
-	NW_BEATDOWN_TEST - Enables some test friendly options, like stopping after
+	NW_BEATDOWN_MODE - Enables some test friendly options, like stopping after
 										 a certain number of requests
 	NW_CATCH_SIGNAL  - Catch signals or not.  Will define free_selector by default.
 	NW_VERBOSE       - Be verbose
@@ -98,12 +41,12 @@
 	whatever.h:
 
   //Contents of "whatever.h"
-	#define MIN_ACCEPTABLE_READ 64   	//Kick requests that fail to read this much
-	#define NW_MAX_BUFFER_SIZ   8192 	//Read no more than this much to buffer
-	#define NW_MAX_BUFFER_SIZ   8192 	//Write no more than this much to buffer
-	#define MAX_OPEN_FILES      256  	//How many files can I have open at once?
-	#define READ_TO_FILE        0    	//When reading, use a file and stream
-	#define READ_TO_BUF         1    	//When reading, use a buffer
+ #define MIN_ACCEPTABLE_READ 64   	//Kick requests that fail to read this much
+ #define NW_MAX_BUFFER_SIZ   8192 	//Read no more than this much to buffer
+ #define NW_MAX_BUFFER_SIZ   8192 	//Write no more than this much to buffer
+ #define MAX_OPEN_FILES      256  	//How many files can I have open at once?
+ #define READ_TO_FILE        0    	//When reading, use a file and stream
+ #define READ_TO_BUF         1    	//When reading, use a buffer
 
 	Bugs
 	----
@@ -113,47 +56,62 @@
 	
  * ------------------------------------- */
 #include <poll.h>
+#include "buff.h"
+
+#define LITE_BUFFER
+
 #ifndef NW_H
 #define NW_H
 
 /*nw has a few sensible defines*/
-#define NW_MIN_ACCEPTABLE_READ      32
-#define NW_MIN_ACCEPTABLE_WRITE     32
-#define NW_MAX_ACCEPTABLE_READ    4096
-#define NW_MAX_ACCEPTABLE_WRITE   4096
-#define NW_RETRY_READ                3
-#define NW_RETRY_WRITE               3
-#define NW_MAX_EVENTS              100
-#define NW_MAX_BUFFER_SIZE       32000 
-#define NW_STREAM_TYPE             "?"
-//#define NW_DISABLE_LOCAL_USERDATA    0 
-//#define NW_DISABLE_GLOBAL_USERDATA   0 
+#ifndef NW_ERROR_BUFFER_LENGTH
+ #define NW_ERROR_BUFFER_LENGTH      4096 
+#endif
+#ifndef NW_MIN_ACCEPTABLE_READ
+ #define NW_MIN_ACCEPTABLE_READ        32
+#endif
+#ifndef NW_MIN_ACCEPTABLE_WRITE
+ #define NW_MIN_ACCEPTABLE_WRITE       32
+#endif
+#ifndef NW_MAX_ACCEPTABLE_READ
+ #define NW_MAX_ACCEPTABLE_READ      4096
+#endif
+#ifndef NW_MAX_ACCEPTABLE_WRITE
+ #define NW_MAX_ACCEPTABLE_WRITE     4096
+#endif
+#ifndef NW_RETRY_READ
+ #define NW_RETRY_READ                  3
+#endif
+#ifndef NW_RETRY_WRITE
+ #define NW_RETRY_WRITE                 3
+#endif
+#ifndef NW_MAX_EVENTS
+ #define NW_MAX_EVENTS                100
+#endif
+#ifndef NW_MAX_BUFFER_SIZE
+ #define NW_MAX_BUFFER_SIZE         64000 
+#endif
+#ifndef NW_STREAM_TYPE
+ #define NW_STREAM_TYPE               "?"
+#endif
+#ifndef NW_BUFF_FIXED
+ #define NW_BUFF_DYNAMIC
+#endif
+#if 0
+#ifndef NW_DISABLE_LOCAL_USERDATA
+ #define NW_DISABLE_LOCAL_USERDATA    0 
+#endif
+#ifndef NW_DISABLE_GLOBAL_USERDATA
+ #define NW_DISABLE_GLOBAL_USERDATA   0 
+#endif
+#endif
+//Choose whether or not to queue writes
+#ifdef NW_QUEUE_WRITES
+ #define NW_QUEUE_WRITE_DIRNAME "local"
+#endif
 
-/*nw's "static" defines, so I don't forget what goes where*/
-enum { NW_RECV = 0, NW_SEND };
 
-/*stream selections*/
-typedef enum { 
-	NW_STREAM_BUF = 0, 
-	NW_STREAM_FD,
-	NW_STREAM_PIPE
-} Stream;
-
-#if 0 /*begin fork test*/
-test -d tests || mkdir tests
-for n in `seq 1 32`; do
-	wget -o tests/index.${n}.html http://localhost:2000 &
-done 
-#endif /* end fork test */
-
-#if 0 /*begin post test*/
-curl --verbose --request POST \
-	--form my_file=@tests/red52x35.jpg \
-	--form paragraph="Flame flame flame" \
-	--form author="Antonio R. Collins II" \
-	http://localhost:2000 
-#endif /* end post test*/
-
+//Follow program flow
 #ifdef NW_FOLLOW
  #define NW_CALL(c) \
 	(c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
@@ -162,8 +120,7 @@ curl --verbose --request POST \
 	c
 #endif
 
-
-/*Return error messages and a code at the same time.*/
+//Return error messages and a code at the same time.
 #ifdef NW_VERBOSE
  #define nw_err(c, ...) \
 	(fprintf(stderr, __VA_ARGS__) ? c : 0)
@@ -172,21 +129,32 @@ curl --verbose --request POST \
 	c
 #endif
 
-/*Reset read event*/
+//Reset read event
 #define nw_reset_read() \
 	r->client->events = POLLRDNORM
 
-/*Reset write event*/
+//Reset write event
 #define nw_reset_write() \
 	r->client->events = POLLWRNORM
 
-/*Reset the receiver*/
+//Reset the receiver
 #define nw_reset_recvr() \
 	memset(r, 0, sizeof(Recvr)); close((&r->client)->fd); (&r->client)->fd = -1
 
-/*Get fd without worrying about pollfd structure*/
+//Get fd without worrying about pollfd structure
 #define nw_get_fd() \
 	r->client->fd
+
+/*nw's "static" defines, so I don't forget what goes where*/
+enum { NW_RECV = 0, NW_SEND };
+
+/*stream selections*/
+typedef enum 
+{
+	NW_STREAM_BUF = 0, 
+	NW_STREAM_FD,
+	NW_STREAM_PIPE
+} Stream;
 
 /*Error map or a big struct?*/
 enum {
@@ -217,6 +185,8 @@ enum {
 	/*Processor errors go here*/
 	ERR_WRITE_CONN_RESET,
 	ERR_WRITE_EGAIN,
+	ERR_OUT_OF_MEMORY,
+	ERR_REQUEST_TOO_LARGE,
 	ERR_WRITE_EBADF,
 	ERR_WRITE_EFAULT,
 	ERR_WRITE_EFBIG,
@@ -231,10 +201,18 @@ enum {
 	ERR_WRITE_CONN_CLOSED_BY_PEER,
 	ERR_WRITE_BELOW_THRESHOLD,
 	ERR_WRITE_MAX_WRITE_RETRY_REACHED,
+
+	/*Failure to allocate within the buffer*/
+	/*ERR_BUFF_REALLOC_FAILURE,
+	ERR_BUFF_OUT_OF_SPACE,*/
+	ERR_TIMEOUT_CONN,
+	ERR_END_OF_CHAIN,
 };
 
 
-typedef enum {
+//Datatype to track where nw is in the request->reply process
+typedef enum 
+{
 	NW_AT_READ = 0,   /*The current connection is read ready.*/
 	NW_AT_PROC,       /*The current connection is processing a response*/
 	NW_AT_WRITE,      /*The current conenction is write ready*/
@@ -244,40 +222,43 @@ typedef enum {
 } Stage;
 
 
-/*Here is a similar structure*/
+
+//Datatype to manage buffering of receipt and relay of network messages
 typedef struct {
   Socket            child;
 	Stage             stage;
+	int              rb, sb;  //Bytes received at an invocation of the "read loop"
+  int         recvd, sent;  //Total bytes sent or received
+  int                 len;  //Length of message to be sent?
+	int               error;  //Was an error detected?
+  uint8_t          errbuf[NW_ERROR_BUFFER_LENGTH];  //For error messages when everything may fail
 #if 0
-	int            bytes[2];  /*Bytes received ([0]) or sent ([1])*/
-	int            total[2];  /*Total bytes received ([0]) or sent ([1])*/
-	int           msglen[2];  /*Total bytes in message (usually not needed for receive end)*/
-	int            retry[2];  /*Read retry[0], write retry[1]*/
-	/*Only one of these will be in use*/
-	int               fd[2];  /*Disk file or pipe*/
-	int              pfd[2];  /*Disk file or pipe*/
-	uint8_t       buffer[2]   /*Max buffer size*/
-     [NW_MAX_BUFFER_SIZE];
-#else 
-	int              rb, sb;
-  int         recvd, sent;
-  int                 len;
-  int          request_fd;
+  int          request_fd;  
   int         response_fd;
-  uint8_t         request[NW_MAX_BUFFER_SIZE];
-  uint8_t        response[NW_MAX_BUFFER_SIZE];
+#endif
+#ifdef NW_BUFF_FIXED
+  uint8_t        request_[NW_MAX_BUFFER_SIZE];
+  uint8_t       response_[NW_MAX_BUFFER_SIZE];
+#endif
+  uint8_t        *request;
+  uint8_t       *response;
+	Buffer       _request;
+	Buffer      _response;
+	int      sretry, rretry;
 	int          recv_retry;/*3*/
 	int          send_retry;/*5*/
-#endif
+	int          *socket_fd;  //Pointer to parent socket?
+	struct pollfd   *client;  //Pointer to currently being served client
 #ifndef NW_DISABLE_LOCAL_USERDATA
 	void          *userdata;
 #endif
-	int          *socket_fd;
-	struct pollfd   *client;/*Will always point to one client*/
+	//This allows nw to cut connections that have been on too long
+	struct timespec start;
+	struct timespec end;
 } Recvr;
 
 
-/*Structure to control event handlers*/
+//Datatype to control event handlers
 typedef struct { 
 	_Bool (*exe)(Recvr *r, void *ud, char *err);
 	enum {
@@ -291,7 +272,7 @@ typedef struct {
 } Executor;
 
 
-/*Structure to control "stream" handlers*/
+//Dataype to control "stream" handlers
 typedef struct {
 	/*Should support writing to file or to memory*/ 
 	//_Bool (*exe)(void *in, void *out);
@@ -300,46 +281,44 @@ typedef struct {
 } Streamer;
 
 
-/*Structure for setting up the loop*/
-typedef struct {
-	Recvr    *rarr       ;  /*Array to choose which "receiver" you want*/
-#if 0
-	int       min[2]     ;  /*min read is first index 0, min write is second index 1*/
-	int       max[2]     ;  /*max read is first index 0, max write is second index 1*/
-	int       retry[2]   ;  /*read retry is first index, write is second*/
-#else
-	int       read_min   ;  /*How much data needs to be read at a time?*/
-	int       write_min  ;  /*How much data needs to be written at a time?*/
-	int8_t    recv_retry ;  /*Number of times to retry reading*/
-	int8_t    send_retry ;  /*Number of times to retry sending*/
-#endif
+//Datatype to set up a server or client
+typedef struct 
+{
+	int       read_min   ,  /*How much data needs to be read at a time?*/
+	          write_min  ;  /*How much data needs to be written at a time?*/
+	int8_t    recv_retry ,  /*Number of times to retry reading*/
+	          send_retry ;  /*Number of times to retry sending*/
 	Stream    stream     ;  /*Which stream to use*/
-	Socket   *parent     ;  /*The big daddy socket of whatever server you're running*/
 	Executor *errors,       /*Error handlers*/
            *runners    ;  /*Connection life cycle handlers*/
+	int       run_limit  ;  /*A time limit to cut long running connections*/ 
 	int       max_events ;  /*How many events should I allow to queue at a time?*/
+	_Bool     keepalive  ;  /*Should the user be responsible for closing connections?*/
+
 #ifndef NW_DISABLE_GLOBAL_USERDATA
 	void     *global_ud  ;  /*Global userdata (not copied)*/
 #endif
+
 #ifndef NW_DISABLE_LOCAL_USERDATA
 	int       lsize      ;  /*Size of one local userdata*/
-	int       tsize      ;  /*Total size of all local userdata (not touched)*/
 	void    **local_ud   ;  /*Local userdata (this src doled out per max_events)*/
 #endif
-	_Bool     keepalive  ;  /*Should the user be responsible for closing connections?*/
-	struct    pollfd *clients;
-#ifdef NW_BEATDOWN_TEST
+
+#ifdef NW_BEATDOWN_MODE
 	int       stop_at    ;  /*Stop serving after x amount of requests*/
 #endif
-#if 0
-	const pollfd clients[];  /*The user SHOULD NOT be able to modify this from the main loop, this should handle it*/
-#endif
+
+	//Stuff I'll never set
+	struct    
+   pollfd  *clients;
+	int       tsize      ;  /*Total size of all local userdata (not touched)*/
+	Socket   *parent     ;  /*The big daddy socket of whatever server you're running*/
+	Recvr    *rarr       ;  /*Array to choose which "receiver" you want*/
 } Selector;
 
 
-static _Bool dummy (Recvr *r, void *ud, char *err);
-
-extern Executor _nw_errors[ERR_WRITE_MAX_WRITE_RETRY_REACHED + 1];
+//All forward declarations
+extern Executor _nw_errors[ERR_END_OF_CHAIN + 1];
 _Bool initialize_selector (Selector *, Socket *);
 void free_selector (Selector *s);
 _Bool activate_selector (Selector *s); 
@@ -352,4 +331,7 @@ _Bool reset_buffer (Recvr *r, void *ud, char *err);
 _Bool nw_close_fd (Recvr *r, void *ud, char *err);
 _Bool nw_finish_fd (Recvr *r, void *ud, char *err);
 _Bool nw_reset_fd (Recvr *r, void *ud, char *err);
+_Bool nw_add_read (Recvr *r, uint8_t *msg, int size);
+_Bool nw_add_write (Recvr *r, uint8_t *msg, int size); 
+void nw_set_error (Recvr *r);
 #endif

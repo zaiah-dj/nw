@@ -11,12 +11,14 @@ Libraries like libevent and libuv will outperform nw on raw speed, but nw aims t
 simpler to use than libevent or libuv by adhering to some simple goals.
 
 <ul>
-<li>Be useful with two files (nw.c and nw.h), one object (nw.o)</li>
-<li>Be single threaded</li>
-<li>Do not try to run on every Unix known to man</li>
-<li>Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)</li>
-<li>Focus on the network (UDP and TCP, not really worried about IPC)</li>
+<li>1. Be useful with two files (nw.c and nw.h), one object (nw.o)</li>
+<li>2. Operate well in both single threaded and multi threaded environments</li>
+<li>3. Do not try to run on every Unix known to man</li>
+<li>4. Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)</li>
+<li>5. Focus on the network (UDP and TCP, not really worried about IPC)</li>
 </ul>
+
+We are almost there, as only items 1 and 5 need to be worked on a bit more.
 
 
 Dependencies
@@ -30,7 +32,7 @@ Compiling
 ---------
 <p>
 <h3>Linux</h3>
-<code>gcc -Wall -std=c99</code> should yield the library you need.  If you do run into any build errors, please notify me at ramar.collins@gmail.com.
+<code>gcc -Wall -std=c99</code> should yield the library you need.  If you do run into any build errors, please notify me at ramar.collins@gmail.com or send me a pull request.
 </p>
 
 <p>

@@ -1,105 +1,35 @@
-/*select-loop.c*/
-#include "lite.h" //TODO: Modify nw to be totally reliant on regular socket calls
-#include "nw.h"
+/*nw.c - See nw.h for documentation*/
+#include "lite.h"
 #include <poll.h>
+#include "nw.h"
+
+//Include signal handling
 #ifdef NW_CATCH_SIGNAL
  #include <signal.h>
 #endif
 
+//Print a message as we move through branches within the program flow
 #ifdef NW_VERBOSE
-/*Dump the selector*/
-void print_selector (Selector *s) {
-	fprintf(stderr, "max_events: %d\n", s->max_events);
-	fprintf(stderr, "rarr:       %p\n", (void *)s->rarr);
-	fprintf(stderr, "userdata:   %p\n", (void *)s->global_ud);
-	fprintf(stderr, "parent:     %p\n", (void *)s->parent);
-	fprintf(stderr, "clients:    %p\n", (void *)s->clients);
-	fprintf(stderr, "ex:         %p\n", (void *)s->errors);
-	fprintf(stderr, "rwp:        %p\n", (void *)s->runners);
-	fprintf(stderr, "recv_retry: %d\n", s->recv_retry);
-	fprintf(stderr, "send_retry: %d\n", s->send_retry);
-}
-
-
-/*Dump the selector*/
-void print_recvr (Recvr *r) {
-	fprintf(stderr, "child:       %p\n", (void *)&r->child);
-	fprintf(stderr, "recvd:       %d\n", r->recvd);
-	fprintf(stderr, "sent:        %d\n", r->sent);
-	fprintf(stderr, "len:         %d\n", r->len);
-	fprintf(stderr, "stage:       %d\n", r->stage);
-	fprintf(stderr, "request_fd:  %d\n", r->request_fd);
-	fprintf(stderr, "response_fd: %d\n", r->response_fd);
-	fprintf(stderr, "request:     %p\n", (void *)r->request);
-	fprintf(stderr, "response:    %p\n", (void *)r->response);
- #ifndef NW_DISABLE_LOCAL_USERDATA
-	fprintf(stderr, "userdata:    %p\n", r->userdata);
- #endif
-	fprintf(stderr, "pollfd:      %p\n", (void *)&r->client);
-	fprintf(stderr, "pollfd.fd:   %d\n", r->client->fd);
-	/*fprintf(stderr, "pollfd.events:   %d\n", r->client.fd);
-	fprintf(stderr, "pollfd.revents:   %d\n", r->client.fd);*/
-	fprintf(stderr, "recv_retry:  %d\n", r->recv_retry);
-	fprintf(stderr, "send_retry:  %d\n", r->send_retry);
-}
+ #define NW_LOG(c) \
+	(c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
+#else
+ #define NW_CALL(c) \
+	c
 #endif
 
-#ifdef NW_CATCH_SIGNAL
-void nw_set_sighup (int) {
-	free_selector();
-}
+//Include debugging
+#ifdef NW_DEBUG 
+ #define STEP(...) 
+ #define SHOWDATA(...)
+#else
+ #define STEP(...) do { \
+	fprintf( stderr, "%20s [ %s: %d ]", __func__, __FILE__, __LINE__ ); \
+	getchar(); } while (0)
+
+ #define SHOWDATA(...) do { \
+	fprintf(stderr, "%-30s [ %s %d ] -> ", __func__, __FILE__, __LINE__); \
+	fprintf( stderr, __VA_ARGS__ ); } while (0)
 #endif
-
-/*Static list of error codes in text*/
-const char *nw_error_map[] = {
-	[ERR_POLL_INITIAL_ALLOCATOR]        = "File allocation failure.\n",
-	[ERR_POLL_TOO_MANY_FILES]           = "Attempt to open too many files.\n",
-	[ERR_POLL_RECVD_SIGNAL ]            = "Received signal interrupting accept().\n",
-	[ERR_SPAWN_ACCEPT]                  = "Accept failure.\n",
-	[ERR_SPAWN_NON_BLOCK_SET]           = "Could not make child socket non-blocking.\n",
-	[ERR_SPAWN_MAX_CLIENTS]             = "Server has reached maximum number of clients.\n",
-	[ERR_READ_CONN_RESET]               = "Connection reset by peer.\n",
-	[ERR_READ_EGAIN]                    = "No data received, please try reading again.\n",
-	[ERR_READ_EBADF]                    = "No file to receive data from. " \
-                                        "Peer probably closed connection.\n",
-	[ERR_READ_EFAULT]                   = "Server out of space for reading messages.\n",
-	[ERR_READ_EINVAL]                   = "Read of socket is impossible due to " \
-                                        "misalignment or use of O_DIRECT.\n",
-	[ERR_READ_EINTR]                    = "Fatal signal encountered.\n",
-	[ERR_READ_EISDIR]                   = "File descriptor supplied belongs to directory.\n",
-	[ERR_READ_CONN_CLOSED_BY_PEER]      = "Connection closed by peer\n",
-	[ERR_READ_BELOW_THRESHOLD]          = "Data read was below minimum threshold.\n",
-	[ERR_READ_MAX_READ_RETRY_REACHED]   = "Maximum read retry limit reached for " 
-                                        "this client\n",
-	[ERR_WRITE_CONN_RESET]              = "Connection was reset before writing packet " \
-                                        "could resume.\n",
-	[ERR_WRITE_EGAIN]                   = "No data written, please try writing again.\n",
-	[ERR_WRITE_EBADF]                   = "No file to write data to. " \
-                                        "Peer probably closed connection.\n",
-	[ERR_WRITE_EFAULT]                  = "Attempt to write message too large for buffer.\n",
-	[ERR_WRITE_EFBIG]                   = "Attempt to write message too large for buffer.\n",
-	[ERR_WRITE_EDQUOT]                  = "File quota of server has been reached.\n",
-	[ERR_WRITE_EINVAL]                  = "ERR_WRITE_EINVAL...\n",
-	[ERR_WRITE_EIO]                     = "ERR_WRITE_EIO...\n",
-	[ERR_WRITE_ENOSPC]                  = "Kernel buffer exhausted.\n",
-	[ERR_WRITE_EINTR]                   = "Fatal signal encountered.\n",
-	[ERR_WRITE_EPIPE]                   = "Fatal signal encountered.\n",
-	[ERR_WRITE_EPERM]                   = "Fatal: Permission denied when attempting to " \
-                                        "write to socket.\n",
-	[ERR_WRITE_EDESTADDREQ]             = "...\n", /*UDP error*/
-	[ERR_WRITE_CONN_CLOSED_BY_PEER]     = "WRITE_CONN_CLOSED_BY_PEER...\n",
-	[ERR_WRITE_BELOW_THRESHOLD]         = "Data write was below minimum threshold.\n",
-	[ERR_WRITE_MAX_WRITE_RETRY_REACHED] = "Maximum write retry limit reached " \
-                                        "for this client\n", 
-};
-
-/*Static list of loop process codes in text*/
-const char *runner_error_map[] = {
-	[NW_AT_READ]     = "Read handler failed:",
-	[NW_AT_PROC]     = "Processor handler failed:",
-	[NW_AT_WRITE]    = "Write handler failed:",
-	[NW_AT_ACCEPT]   = "Accept handler failed:"
-};
 
 /*Call logging function*/
 #ifdef NW_VERBOSE 
@@ -111,6 +41,10 @@ const char *runner_error_map[] = {
  #define nw_log(...)
  #define nw_error_log(map, code)
 #endif
+
+//Deduce the stage of the request
+#define GETSTAGE(i) \
+	(i == NW_AT_WRITE) ? "write" : (i == NW_AT_READ ) ? "read" : (i == NW_AT_PROC) ? "proc" : "completed"
 
 /*Handle errors via the nw_error_map function pointer table.*/
 #define handle(ERRCODE) { \
@@ -159,29 +93,126 @@ const char *runner_error_map[] = {
 		} \
 	}
 
-/*Print a message as we move through branches within the program flow*/
-#ifdef NW_VERBOSE
- #define NW_LOG(c) \
-	(c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
-#else
- #define NW_CALL(c) \
-	c
-#endif
-
-/*Reset read event*/
+//Reset read event
 #define nw_reset_read() \
 	r->client->events = POLLRDNORM
 
-/*Reset write event*/
+//Reset write event
 #define nw_reset_write() \
 	r->client->events = POLLWRNORM
 
-/*Get fd without worrying about pollfd structure*/
+//Get fd without worrying about pollfd structure
 #define nw_get_fd() \
 	r->client->fd
 
+#ifdef NW_VERBOSE
+//Dump the selector
+void print_selector (Selector *s) 
+{
+	fprintf(stderr, "max_events: %d\n", s->max_events);
+	fprintf(stderr, "rarr:       %p\n", (void *)s->rarr);
+	fprintf(stderr, "userdata:   %p\n", (void *)s->global_ud);
+	fprintf(stderr, "parent:     %p\n", (void *)s->parent);
+	fprintf(stderr, "clients:    %p\n", (void *)s->clients);
+	fprintf(stderr, "ex:         %p\n", (void *)s->errors);
+	fprintf(stderr, "rwp:        %p\n", (void *)s->runners);
+	fprintf(stderr, "recv_retry: %d\n", s->recv_retry);
+	fprintf(stderr, "send_retry: %d\n", s->send_retry);
+}
+
+
+/*Dump the selector*/
+void print_recvr (Recvr *r) 
+{
+	fprintf(stderr, "child:       %p\n", (void *)&r->child);
+	fprintf(stderr, "recvd:       %d\n", r->recvd);
+	fprintf(stderr, "sent:        %d\n", r->sent);
+	fprintf(stderr, "len:         %d\n", r->len);
+	fprintf(stderr, "stage:       %d\n", r->stage);
+ #if 0
+	fprintf(stderr, "request_fd:  %d\n", r->request_fd);
+	fprintf(stderr, "response_fd: %d\n", r->response_fd);
+ #endif
+ #ifdef NW_BUFF_FIXED
+	fprintf(stderr, "request:     %p\n", (void *)r->request);
+	fprintf(stderr, "response:    %p\n", (void *)r->response);
+ #endif
+ #if 0
+	fprintf(stderr, "request:     %p\n", (void *)r->_request1->buffer);
+	fprintf(stderr, "response:    %p\n", (void *)r->_response1->buffer);
+ #endif
+ #ifndef NW_DISABLE_LOCAL_USERDATA
+	fprintf(stderr, "userdata:    %p\n", r->userdata);
+ #endif
+	fprintf(stderr, "pollfd:      %p\n", (void *)&r->client);
+	fprintf(stderr, "pollfd.fd:   %d\n", r->client->fd);
+	/*fprintf(stderr, "pollfd.events:   %d\n", r->client.fd);
+	fprintf(stderr, "pollfd.revents:   %d\n", r->client.fd);*/
+	fprintf(stderr, "recv_retry:  %d\n", r->recv_retry);
+	fprintf(stderr, "send_retry:  %d\n", r->send_retry);
+}
+#endif
+
+
+/*Static list of error codes in text*/
+const char *nw_error_map[] = {
+	[ERR_POLL_INITIAL_ALLOCATOR]        = "File allocation failure.\n",
+	[ERR_POLL_TOO_MANY_FILES]           = "Attempt to open too many files.\n",
+	[ERR_POLL_RECVD_SIGNAL ]            = "Received signal interrupting accept().\n",
+	[ERR_SPAWN_ACCEPT]                  = "Accept failure.\n",
+	[ERR_SPAWN_NON_BLOCK_SET]           = "Could not make child socket non-blocking.\n",
+	[ERR_SPAWN_MAX_CLIENTS]             = "Server has reached maximum number of clients.\n",
+	[ERR_READ_CONN_RESET]               = "Connection reset by peer.\n",
+	[ERR_READ_EGAIN]                    = "No data received, please try reading again.\n",
+	[ERR_READ_EBADF]                    = "No file to receive data from. " \
+                                        "Peer probably closed connection.\n",
+	[ERR_READ_EFAULT]                   = "Server out of space for reading messages.\n",
+	[ERR_READ_EINVAL]                   = "Read of socket is impossible due to " \
+                                        "misalignment or use of O_DIRECT.\n",
+	[ERR_READ_EINTR]                    = "Fatal signal encountered.\n",
+	[ERR_READ_EISDIR]                   = "File descriptor supplied belongs to directory.\n",
+	[ERR_READ_CONN_CLOSED_BY_PEER]      = "Connection closed by peer\n",
+	[ERR_READ_BELOW_THRESHOLD]          = "Data read was below minimum threshold.\n",
+	[ERR_READ_MAX_READ_RETRY_REACHED]   = "Maximum read retry limit reached for " 
+                                        "this client\n",
+	[ERR_WRITE_CONN_RESET]              = "Connection was reset before writing packet " \
+                                        "could resume.\n",
+	[ERR_WRITE_EGAIN]                   = "No data written, please try writing again.\n",
+	[ERR_OUT_OF_MEMORY]                 = "Out of memory.\n",
+	[ERR_REQUEST_TOO_LARGE]             = "The request made was too large.\n",
+	[ERR_WRITE_EBADF]                   = "No file to write data to. " \
+                                        "Peer probably closed connection.\n",
+	[ERR_WRITE_EFAULT]                  = "Attempt to write message too large for buffer.\n",
+	[ERR_WRITE_EFBIG]                   = "Attempt to write message too large for buffer.\n",
+	[ERR_WRITE_EDQUOT]                  = "File quota of server has been reached.\n",
+	[ERR_WRITE_EINVAL]                  = "ERR_WRITE_EINVAL...\n",
+	[ERR_WRITE_EIO]                     = "ERR_WRITE_EIO...\n",
+	[ERR_WRITE_ENOSPC]                  = "Kernel buffer exhausted.\n",
+	[ERR_WRITE_EINTR]                   = "Fatal signal encountered.\n",
+	[ERR_WRITE_EPIPE]                   = "Fatal signal encountered.\n",
+	[ERR_WRITE_EPERM]                   = "Fatal: Permission denied when attempting to " \
+                                        "write to socket.\n",
+	[ERR_WRITE_EDESTADDREQ]             = "...\n", /*UDP error*/
+	[ERR_WRITE_CONN_CLOSED_BY_PEER]     = "WRITE_CONN_CLOSED_BY_PEER...\n",
+	[ERR_WRITE_BELOW_THRESHOLD]         = "Data write was below minimum threshold.\n",
+	[ERR_WRITE_MAX_WRITE_RETRY_REACHED] = "Maximum write retry limit reached " \
+                                        "for this client\n", 
+};
+
+/*Static list of loop process codes in text*/
+const char *runner_error_map[] = {
+	[NW_AT_READ]     = "Read handler failed:",
+	[NW_AT_PROC]     = "Processor handler failed:",
+	[NW_AT_WRITE]    = "Write handler failed:",
+	[NW_AT_ACCEPT]   = "Accept handler failed:"
+};
+
+
+//Dummy's forward declaration
+static _Bool dummy (Recvr *r, void *ud, char *err);
+
 /*Default executor table for those who don't want to be bothered*/
-Executor _nw_errors[ERR_WRITE_MAX_WRITE_RETRY_REACHED + 1] = {
+Executor _nw_errors[ERR_END_OF_CHAIN + 1] = {
 	[ERR_POLL_INITIAL_ALLOCATOR]        = { dummy          , NW_NOTHING  },
 	[ERR_POLL_TOO_MANY_FILES]           = { dummy          , NW_NOTHING  },
 	[ERR_POLL_RECVD_SIGNAL ]            = { dummy          , NW_RETURN   },
@@ -199,6 +230,8 @@ Executor _nw_errors[ERR_WRITE_MAX_WRITE_RETRY_REACHED + 1] = {
 	[ERR_READ_MAX_READ_RETRY_REACHED]   = { dummy          , NW_CONTINUE },
 	[ERR_WRITE_CONN_RESET]              = { nw_reset_fd    , NW_CONTINUE },
 	[ERR_WRITE_EGAIN]                   = { reset_write_fd , NW_CONTINUE },
+	[ERR_OUT_OF_MEMORY]                 = { nw_reset_fd    , NW_CONTINUE },
+	[ERR_REQUEST_TOO_LARGE]             = { nw_reset_fd    , NW_CONTINUE },
 	[ERR_WRITE_EBADF]                   = { nw_reset_fd    , NW_CONTINUE },
 	[ERR_WRITE_EFAULT]                  = { reset_buffer   , NW_CONTINUE },
 	[ERR_WRITE_EFBIG]                   = { reset_buffer   , NW_CONTINUE },
@@ -213,6 +246,7 @@ Executor _nw_errors[ERR_WRITE_MAX_WRITE_RETRY_REACHED + 1] = {
 	[ERR_WRITE_CONN_CLOSED_BY_PEER]     = { nw_reset_fd    , NW_CONTINUE },
 	[ERR_WRITE_BELOW_THRESHOLD]         = { nw_reset_fd    , NW_CONTINUE },
 	[ERR_WRITE_MAX_WRITE_RETRY_REACHED] = { nw_reset_fd    , NW_CONTINUE },
+	[ERR_TIMEOUT_CONN]                  = { nw_reset_fd    , NW_CONTINUE },
 };
 
 /*A default processor for those who don't set all of them*/
@@ -242,12 +276,22 @@ static Selector _default = {
 
 
 /*Close fd and reset all memory and "trackers" for this connection*/
-static void reset_recvr (Recvr *r) {
+static void reset_recvr (Recvr *r) 
+{
+	SHOWDATA( "resetting recvr structure and freeing scratch space... " );
 	memset(&r->child, 0, sizeof(Socket));
-	memset(&r->request[0], 0, NW_MAX_BUFFER_SIZE); 
-	memset(&r->response[0], 0, NW_MAX_BUFFER_SIZE);	
+#ifdef NW_BUFF_FIXED
+	memset(&r->request_, 0, NW_MAX_BUFFER_SIZE); 
+	memset(&r->response_, 0, NW_MAX_BUFFER_SIZE);	
+#else
+	bf_free( &r->_request );
+	bf_free( &r->_response );
+#endif
+	memset(&r->start, 0, sizeof(struct timespec));
+	memset(&r->end, 0, sizeof(struct timespec));
 	r->rb = 0, 
 	r->sb = 0, 
+	r->error = 0, 
 	r->recvd = 0, 
 	r->sent = 0, 
 	r->len = 0, 
@@ -256,108 +300,206 @@ static void reset_recvr (Recvr *r) {
 	r->send_retry = 0;
 }
 
-/*Readers and writers*/
-_Bool dummy_reader (void *in, void *out) { return 0; } 
 
-_Bool dummy_writer (void *in, void *out) { return 0; }
 
-_Bool __breader__ (Recvr *r) {
-	r->recvd += r->rb = read(r->client->fd, &r->request[r->recvd], NW_MAX_BUFFER_SIZE - r->recvd);
-	return 1;
+//Read from a socket
+int nw_read (Recvr *r) 
+{
+	uint8_t etc[ NW_MAX_BUFFER_SIZE ] = { 0 };
+	r->rb = read(r->client->fd, etc, NW_MAX_BUFFER_SIZE - 1);
+
+	if ( !r->rb )
+		return ERR_READ_CONN_CLOSED_BY_PEER;
+	else if ( r->rb == -1 ) 
+	{
+		switch (errno) {
+			case ECONNRESET:
+				return ERR_READ_CONN_RESET;
+			case EAGAIN/*Try reading again in a minute...*/:
+				r->client->events = POLLRDNORM;
+				return ERR_READ_EGAIN;
+			case EBADF:
+				reset_recvr(r);
+				return ERR_READ_EBADF;
+			case EFAULT:
+				reset_recvr(r);
+				return ERR_READ_EFAULT;
+			case EINVAL:
+				reset_recvr(r);
+				return ERR_READ_EINVAL;
+			case EINTR:
+				reset_recvr(r);
+				return ERR_READ_EINTR;
+			case EISDIR:
+				reset_recvr(r);
+				return ERR_READ_EISDIR;
+			default:
+				break;
+		}
+	}
+
+	//Now depending on model, this will or won't shut down on you...
+	if ( !bf_append( &r->_request, etc, r->rb ) ) 
+	{
+		if ( r->_request.error == ERR_BUFF_REALLOC_FAILURE ) {
+			return ERR_OUT_OF_MEMORY;
+		}
+		else if ( r->_request.error == ERR_BUFF_OUT_OF_SPACE ) {
+			return ERR_REQUEST_TOO_LARGE;
+		}
+	}
+
+	r->recvd += r->rb;
+	r->request = (&r->_request)->buffer;
+	return 0;
 }
 
-_Bool __bwriter__ (Recvr *r) {
-	/*Check it's not bigger than the NW_MAX_BUFFER_SIZE*/
-	r->sent  += r->sb = write(r->client->fd, &r->response[r->sent], r->len - r->sent);
-	return 1;
-} 
 
-/*This should be the slowest...*/
-_Bool __freader__ (Recvr *r) {
-	/*Make a buffer, since there's no way to read directly without using a pipe*/
-	uint8_t tmp[NW_MAX_BUFFER_SIZE] = {0};
-	int status;
 
-	/*Open or set the file reference (If speed is a problem, pre-open all of the files...)*/
-	r->request_fd = (!r->request_fd) ? open( "a", O_RDWR | O_CREAT, S_IRUSR | S_IWUSR ) : r->request_fd;
+//Write to socket - always assumes the message is ready
+_Bool nw_write (Recvr *r) 
+{
+	//Check that you're not writing to uninitialized memory.
+	SHOWDATA( "file             %d\n", r->client->fd );	
+	SHOWDATA( "supposed length  %d\n", r->len );	
+	SHOWDATA( "actual length    %d\n", bf_written( &r->_response ));
 
-	/*Open the file*/
-	r->recvd += r->rb = read(r->client->fd, tmp, NW_MAX_BUFFER_SIZE);
+#ifdef NW_QUEUE_WRITES
+	//This has the same failures, we don't really care...
+	int fd = 0;
+	static int fn = 0;
+	struct stat sb;
+	uint8_t *wB = bf_data( &r->_response );
+	char fbuf[64] = {0};
 
-	/*Write the results somewhere...*/
-	if ((status = write(r->request_fd, tmp, r->rb)) == -1)
-		return 0;
-	return 1;
+	//?
+	snprintf( fbuf, 63, "%s/%d", NW_QUEUE_WRITE_DIRNAME, fn++ );
+	mkdir( NW_QUEUE_WRITE_DIRNAME, S_IRWXU );
+	if ( open( fbuf, O_CREAT | O_RDWR, S_IRWXU ) == -1 )
+		return 1;
+	if ( (r->sb = write( fd, wB, r->len - r->sent)) == -1 )
+		return 1;
+	if ( close( fd ) == -1 )
+		return 1;
+	SHOWDATA( "%-5d bytes written to file %s\n", r->sb, fbuf);
+
+#else
+
+	//Choose a buffer to write from
+	uint8_t *wB = ( r->error ) ? r->errbuf : &r->_response.buffer[r->sent];
+	r->sb = write(r->client->fd, wB, r->len - r->sent);
+
+	SHOWDATA( "write() syscall returned %d\n", r->sb );
+
+	if ( !r->sb ) 
+	{
+		reset_recvr(r);
+		return ERR_WRITE_CONN_CLOSED_BY_PEER;
+	}
+	else if ( r->sb == -1 ) 
+	{
+		switch (errno) {
+			case EAGAIN: /*This shoudn't happen, but if it does...*/
+				return ERR_WRITE_EGAIN;
+			case EBADF:      /*Peer closed early, why is it here?*/
+				reset_recvr(r);
+				return ERR_WRITE_EBADF;
+			case EFAULT:   /*I don't have any more space to write*/
+				reset_recvr(r);
+				return ERR_WRITE_EFAULT;
+			case EFBIG:             /*I can't send this much data*/
+				reset_recvr(r);
+				return ERR_WRITE_EFBIG;
+			/*In these cases, I have little choice but to close the peer*/
+			case EDQUOT: 
+				reset_recvr(r);
+				return ERR_WRITE_EDQUOT;
+			case EINVAL:
+				reset_recvr(r);
+				return ERR_WRITE_EINVAL;
+			case EIO:
+				reset_recvr(r);
+				return ERR_WRITE_EIO;
+			case ENOSPC:
+				reset_recvr(r);
+				return ERR_WRITE_ENOSPC;
+			case EINTR:
+				reset_recvr(r);
+				return ERR_WRITE_EINTR;
+			case EPIPE:
+				reset_recvr(r);
+				return ERR_WRITE_EPIPE;
+			case EPERM: /*I can't write, b/c another process disallowed it*/
+				reset_recvr(r);
+				return ERR_WRITE_EPERM;
+			/*case EDESTADDREQ: //TODO: GCC complains.  Why?
+				handle(ERR_WRITE_EDESTADDREQ); 
+				close_fds(i); */
+			default:
+				break;		
+		}
+	}
+
+	r->sent += r->sb;
+	//This needs to repeat if it wasn't done...
+#endif
+	return 0;
 }
 
-/*This isn't technically a writer...*/
-_Bool __fwriter__ (Recvr *r) {
-	/*Make a buffer, since there's no way to read directly without using a pipe*/
-	uint8_t tmp[NW_MAX_BUFFER_SIZE] = {0};
-	int status;
 
-	/*Open or set the file reference (If speed is a problem, pre-open all of the files...)*/
-	r->response_fd = (!r->response_fd) ? open( "a", O_RDWR | O_CREAT, S_IRUSR | S_IWUSR ) : r->response_fd;
 
-	/*Open the file*/
-	r->sent += r->sb = write(r->client->fd, tmp, NW_MAX_BUFFER_SIZE);
-
-	/*Write the results somewhere...*/
-	if ((status = write(r->response_fd, tmp, r->sb)) == -1)
-		return 0;
-
-	return 1;
-} 
-
-_Bool __preader__ (Recvr *r) {
-	r->recvd += r->rb = read(r->client->fd, &r->request[r->recvd], NW_MAX_BUFFER_SIZE - r->recvd);
-	return 1;
+//Set the error descriptor
+void nw_set_error (Recvr *r) 
+{
+	r->error = 1;
 }
 
-_Bool __pwriter__ (Recvr *r) {
-	r->sent  += r->sb = write(r->client->fd, &r->response[r->sent], r->len - r->sent);
-	//provided the FINISHED response is saved to pipe, then you should be fine...
-	//sendfile(r->client->fd, pipe_read_end);
-	return 1;
-} 
 
-/*Stacked functions for reading, writing, and manipulating buffers*/
-Streamer stream[] = {
-	[NW_STREAM_BUF] = { __breader__, __bwriter__ },
-	[NW_STREAM_FD]  = { __freader__, __fwriter__ },
-	[NW_STREAM_PIPE]= { __preader__, __pwriter__ },
-};
-
-/*Reset file descriptor for reading*/
-_Bool reset_read_fd (Recvr *r, void *ud, char *err) {
+//Reset file descriptor for reading
+_Bool reset_read_fd (Recvr *r, void *ud, char *err) 
+{
 	r->client->events = POLLRDNORM;
 	return 1;
 }
 
-/*Reset file descriptor for writing */
-_Bool reset_write_fd (Recvr *r, void *ud, char *err) {
+
+
+//Reset file descriptor for writing
+_Bool reset_write_fd (Recvr *r, void *ud, char *err) 
+{
 	r->client->events = POLLWRNORM;
 	return 1;
 }
 
-/*Clear buffer*/
-_Bool reset_buffer (Recvr *r, void *ud, char *err) {
+
+
+//Clear buffer
+_Bool reset_buffer (Recvr *r, void *ud, char *err) 
+{
 	return (memset(r->response, 0, NW_MAX_BUFFER_SIZE) != NULL);
 }
 
-/*A dummy function for the purposes of this tutorial*/
-static _Bool dummy (Recvr *r, void *ud, char *err) {
+
+
+//Dummy function for certain actions
+static _Bool dummy (Recvr *r, void *ud, char *err) 
+{
 	return 0;
 }
 
-/*Close*/
-_Bool nw_close_fd (Recvr *r, void *ud, char *err) {
+
+
+//Close a file descriptor
+_Bool nw_close_fd (Recvr *r, void *ud, char *err) 
+{
 	return ((close(r->client->fd) != -1) && (r->client->fd = -1));
 }
 
-/*...*/
-_Bool nw_reset_fd (Recvr *r, void *ud, char *err) {
-	print_recvr(r);
+
+
+//Reset a file descriptor by closing it and resetting its accompanying Recvr structure
+_Bool nw_reset_fd (Recvr *r, void *ud, char *err) 
+{
 	fprintf(stderr, "r->client is:   %p\n",  (void *)r->client);
 	fprintf(stderr, "r->client->fd:  %d\n",  r->client->fd);
 	reset_recvr(r);
@@ -365,51 +507,60 @@ _Bool nw_reset_fd (Recvr *r, void *ud, char *err) {
 		return 0;
 	}
 	r->client->fd = -1;
-	print_recvr(r);
 	return 1;
 }
 
 
-/*Initialize the selectors*/
-_Bool initialize_selector (Selector *s, Socket *sock) {
-//_Bool initialize_selector (Selector *s, Socket *sock, void *ud, void * (*ud_init)(void *, int)) {
-	/*Always set up the parent on behalf of the user*/
+
+//Initialize the selectors
+_Bool initialize_selector (Selector *s, Socket *sock) 
+{
+	//Always set up the parent on behalf of the user
 	s->parent = sock;
 
-	/*Always set the parent to non-blocking*/
+	//Always set the parent to non-blocking
 	if (NW_CALL( fcntl(s->parent->fd, F_SETFD, O_NONBLOCK) == -1 )) 
 		return nw_err(0, "fcntl error: %s\n", strerror(errno)); 
 
-	/*Allocate needed pollfd structures here*/
-	if (NW_CALL( !(s->clients = malloc(sizeof(struct pollfd) * s->max_events)) ))
+	//Allocate needed pollfd structures here
+	if (NW_CALL( !(s->clients = calloc(s->max_events, sizeof(struct pollfd))) ))
 		return nw_err(0, "Failed to allocate poll structures.\n");
 
-	/*Allocate needed recvr structures as well.*/
-	//if (NW_CALL( !(s->rarr = calloc(s->max_events, sizeof(Recvr))) ))
-	if (NW_CALL( !(s->rarr = malloc(sizeof(Recvr) * s->max_events)) ))
+	//Allocate needed recvr structures as well.
+	if (NW_CALL( !(s->rarr = calloc(s->max_events, sizeof(Recvr))) ))
 		return nw_err(0, "Failed to allocate space for network receiver structures.\n");
 
-	/*Allocate any local userdata*/
  #ifndef NW_DISABLE_LOCAL_USERDATA
-	if (s->lsize && s->lsize < 0)
+	//Allocate any local userdata
+	if (s->lsize && s->lsize < 0) 
+	{
 		return nw_err(0, "Local userdata size cannot be negative.\n");
-	else if (s->lsize) {
-		if (NW_CALL( !(s->local_ud = malloc(s->lsize * s->max_events)) ))
+	}
+	//TODO: Can't use static userdata yet.
+	else if (s->lsize) 
+	{
+		if (NW_CALL( !(s->local_ud = malloc(s->lsize * s->max_events)) )) {
 			return nw_err(0, "Failed to allocate space for local userdata.\n");
+		}
 		memset(s->local_ud, 0, s->lsize * s->max_events);
 		s->tsize = (s->lsize * s->max_events);
 	}
  #endif
 
-	/*Initialize all fds in pollfd to -1, and allocate any local userdata*/
-	for (int i=0; i<s->max_events; i++) {
+	//Initialize all fds in pollfd to -1, and allocate any local userdata
+	for (int i=0; i<s->max_events; i++) 
+	{
+		//Initialize local userdata
 	 #ifndef NW_DISABLE_LOCAL_USERDATA
 		char *p = (!s->lsize) ? NULL : (char *)s->local_ud;
 		//memset(&p[u], ++a, s->lsize);
 		(&s->rarr[i])->userdata = (!s->lsize) ? NULL : (void *)&p[i * s->lsize];
    #endif
+
+		//Initialize file descriptors to an agreed upon "uninitialized" value (-1 in this case)
 		(&s->clients[i])->fd = -1; 
-		(&s->rarr[i])->socket_fd = &(&s->clients[i])->fd ; 
+		(&s->rarr[i])->socket_fd = &(&s->clients[i])->fd ;
+	
 	}
 
 	/*Ready to read regular data over TCP or UDP*/ 
@@ -442,8 +593,10 @@ _Bool initialize_selector (Selector *s, Socket *sock) {
 }
 
 
-/*If fd's are in use, you might not want to do this...*/
-void free_selector (Selector *s) {
+
+//If fd's are in use, you might not want to do this...
+void free_selector (Selector *s) 
+{
 	free(s->clients);
 	free(s->rarr);
 #ifndef NW_DISABLE_LOCAL_USERDATA
@@ -455,49 +608,92 @@ void free_selector (Selector *s) {
 }
 
 
-/*Activate the poll server loop*/
-_Bool activate_selector (Selector *s) {
+
+//Display Recvr information in a columnar format
+void queue_csv (Selector *s, int count) 
+{
+	//print a header 
+	fprintf( stderr, "\n" );
+	fprintf( stderr, "%-5s;%-5s;%-5s;%-7s;%-7s;%-7s;%-7s;%-15s;%-15s;%-15s\n",
+		"fd","recvd","sent","wlen","stage","reqLen","resLen","reqAddr","resAddr","fdAddr" );
+	fprintf( stderr, 
+		"==============================================================================================\n" );	
+
+	//print all open files...
+	for ( int y=1; y < count; y++ ) 
+	{
+		//print all data in CSV like format
+		Recvr *j = &s->rarr[ y ];
+SHOWDATA( "rq: => %p vs rs: => %p\n", (void *)&j->_request, (void *)&j->_response );
+		fprintf( stderr,
+			"%-5d;%-5d;%-5d;%-7d;%-7s;%-7d;%-7d;%-15p;%-15p;%-15p\n",
+			j->client->fd, j->recvd, j->sent, j->len, GETSTAGE(j->stage), 
+			bf_written( &j->_request ), bf_written( &j->_response ), bf_data( &j->_request ), bf_data( &j->_response ), j->client );
+	}
+}
+
+
+//Activate the poll server loop
+_Bool activate_selector (Selector *s) 
+{
 	/*Define stuff*/
 	Recvr *rr = s->rarr;
 	int maxi = 0, conn = 1, ready;
- #ifdef NW_BEATDOWN_MODE
-	#ifndef NW_BEATDOWN_STOP_AFTER
-	 #define NW_BEATDOWN_STOP_AFTER 100
-	#endif
-	int stop_after = NW_BEATDOWN_STOP_AFTER, stop_ct = 0;
- #endif
+	int connCount = 0;
+	int timeout   = -1;
+	int watching  = 0;
+	int maxbuf    = NW_MAX_BUFFER_SIZE;
 
 	/*Wait for new connections and spawn children*/
-	for (;;) {
-		if (NW_CALL(((ready = poll(s->clients, maxi + 1, -1)) == -1))) {
-			switch (errno) {
-				case EAGAIN:
-					//handle(ERR_POLL_INITIAL_ALLOCATOR);
-				case EINVAL:
-					//handle(ERR_POLL_TOO_MANY_FILES);
-				case EINTR:
-					//handle(ERR_POLL_RECVD_SIGNAL );
-				default:
-					break;
-			}	
-		}
+	for (;;) 
+	{
+		if (NW_CALL(((ready = poll(s->clients, (watching = maxi + 1), timeout)) == -1))) 
+			{ switch (errno) {
+					case EAGAIN: fprintf( stderr, "repeat the call...\n" ); continue;
+					case EINVAL: case EINTR: exit( 0 ); 
+					default: break; }}
 
 		/*Check event, accept, set non-block and set last open file*/
-		if (NW_CALL( s->clients[0].revents & POLLRDNORM )) {
+		/*NOTE: the following is just an unclear way to specify that the parent received a Read event*/
+		if (NW_CALL( s->clients[0].revents & POLLRDNORM )) 
+		{
 			Recvr  *r     = &rr[conn]; 
 			Socket *child = &r->child;
 
+			/*What does the server do when we reach the maximum connections?*/
+			if (NW_CALL( conn == s->max_events ))
+				handle(ERR_SPAWN_MAX_CLIENTS);
+
+			/* if (NW_CALL( accept( s->clients[0].fd, NULL, NULL ) )*/
 			if (NW_CALL( !socket_accept(s->parent, child) ))
 				handle(ERR_SPAWN_ACCEPT);
 
-		#ifdef NW_BEATDOWN_MODE
-			if (++stop_ct > stop_after)
-				return 1;
+		#ifdef NW_BUFF_FIXED
+			//Initialize space for messages
+			if (NW_CALL( !bf_init( &r->_request, r->request_, maxbuf ) || !bf_init( &r->_response, r->response_, maxbuf )))
+			{
+				fprintf( stderr, "Failed to allocate thingy." );
+				exit( 0 );
+			}
+		#else
+			if ( !bf_init( &r->_request, NULL, maxbuf ) || !bf_init( &r->_response, NULL, maxbuf ) ) 
+			{
+				fprintf( stderr, "Failed to allocate request buffer." );
+				exit( 0 );
+			}
 		#endif
 
 		#if 0
-			/*Handle for socket data goes here*/
-			uhandle(NW_AT_ACCEPT);
+			/*Start connection timer up here*/
+			if ( s->run_limit && r->start.tv_sec ) {
+fprintf( stderr, "TIMEOUT CALC!!!\n" );
+				if ( clock_gettime( CLOCK_REALTIME, &r->end ) == -1	)
+					; /*EFAULT, EINVAL, EPERM - right now, I don't care*/
+				else {
+					if ((r->end.tv_sec - r->start.tv_sec) > s->run_limit )
+						handle( ERR_TIMEOUT_CONN );
+				}
+			}
 		#endif
 
 			/*Make the new socket non-blocking*/
@@ -505,198 +701,162 @@ _Bool activate_selector (Selector *s) {
 				handle(ERR_SPAWN_NON_BLOCK_SET);
 
 			/*Find the last open connection (there must be a better way)*/
-			for (conn=1; conn<s->max_events; conn++) {
-				if (s->clients[conn].fd < 0) {
+			for (conn=1; conn<s->max_events; conn++)
+			{
+				SHOWDATA( "conn: %d -> connfd: %d\n", conn, s->clients[conn].fd );
+				if (s->clients[conn].fd < 0) 
+				{
+					/*Set descriptor event*/
 					s->clients[conn].fd = child->fd;
+					s->clients[conn].events = POLLRDNORM;
+					SHOWDATA( "conn: %d -> now connfd: %d\n", conn, s->clients[conn].fd );
+					conn++;
+					SHOWDATA( "next conn: %d -> its fd: %d\n", conn, s->clients[conn].fd );
 					break;
 				}
 			}
 
-			/*What does the server do when we reach the maximum connections?*/
-			if (NW_CALL( conn == s->max_events ))
-				handle(ERR_SPAWN_MAX_CLIENTS);
-
-			/*Initialize the "Recvr" and set descriptor event*/
-			s->clients[conn].events = POLLRDNORM;
-
 			/*Finally, set the new top and start the real work*/
-			if (conn > maxi)
+			if ( conn > maxi )
 				maxi = conn;
-			if (--ready <= 0)
+			if ( --ready <= 0 )
 				continue;	
 		} /*(NW_CALL( s->clients[0].revents & POLLRDNORM ))*/
 
-		/*Loop through each file descriptor*/
-		for (int i = 1; i <= maxi; i++) {
-			Recvr  *r = &rr[i]; 
-			r->client = &s->clients[i];
+		/*maxi needs to drop when connections go away - if not, the poll structure
+			is watching for events on descriptors that it doesn't have to*/
 
-			/*Skip untouched or closed descriptors*/
+		for (int i = 1; i <= maxi; i++) 
+		{
+			Recvr  *r    = &rr[i]; 
+			r->client    = &s->clients[i];
+			//r->request = r->_request.buffer;
+			//r->response = r->_response.buffer;
+			r->request   = (&r->_request)->buffer;
+			r->response  = (&r->_response)->buffer;
+			int error;
+			int min_read =
+			#ifdef NW_MIN_ACCEPTABLE_READ
+				NW_MIN_ACCEPTABLE_READ
+			#else
+				s->read_min
+			#endif
+			;
+			int min_write = 
+			#ifdef NW_MIN_ACCEPTABLE_WRITE
+				NW_MIN_ACCEPTABLE_WRITE
+			#else
+				s->write_min
+			#endif
+			;
+
+			//Skip untouched or closed descriptors
 			if (NW_CALL( r->client->fd < 0 ))
 				continue;
 
-			/*Try to receive as much data as possible*/
-			if (NW_CALL( r->client->revents & (POLLRDNORM | POLLERR) )) {
+		#if 0
+			/*Check if the server should stop the timer*/
+			if ( s->run_limit && !r->start.tv_sec ) {
+				if ( clock_gettime( CLOCK_REALTIME, &r->start ) == -1	)
+					; /*EFAULT, EINVAL, EPERM - worth handling...*/
+			}
+		#endif
+
+			//Read what's on the socket
+			if (NW_CALL( r->client->revents & POLLRDNORM /*| POLLERR)*/ )) 
+			{
 				r->stage = NW_AT_READ; 
 
-				//Though this is clear, I'm missing something...
-				stream[s->stream].read(r);
-		
-				/*Handle errors or bad reads...*/
-				if (NW_CALL( r->rb == 0 ))	{
-					handle(ERR_READ_CONN_CLOSED_BY_PEER);
+				//NOTE: It would be more consitent to set an error within the recvr
+				if (NW_CALL( (error  = nw_read( r ) ))) {
+					handle ( error );
 				}
-				else if (NW_CALL( r->rb == -1)) { 
-					switch (errno) {
-						case ECONNRESET:
-							handle(ERR_READ_CONN_RESET);
-						case EAGAIN/*Try reading again in a minute...*/:
-							r->client->events = POLLRDNORM;
-							handle(ERR_READ_EGAIN);
-						case EBADF:
-							reset_recvr(r);
-							handle(ERR_READ_EBADF);
-						case EFAULT:
-							reset_recvr(r);
-							handle(ERR_READ_EFAULT);
-						case EINVAL:
-							reset_recvr(r);
-							handle(ERR_READ_EINVAL);
-						case EINTR:
-							reset_recvr(r);
-							handle(ERR_READ_EINTR);
-						case EISDIR:
-							reset_recvr(r);
-							handle(ERR_READ_EISDIR);
-						default:
-							break;
-					}
-				} 
-#if 0
-				/*Peer closed connection.  So drop it all...*/	
-				else if (r->rb == 0) { 
-					handle(ERR_READ_CONN_CLOSED_BY_PEER);
-					return 0;
-				}
-#endif
-				else {
-					/*ENTRY - Handle rereads, where to put stuff, etc.*/
-				#ifdef NW_MIN_ACCEPTABLE_READ
-					int min_read = NW_MIN_ACCEPTABLE_READ;
-				#else
-					int min_read = s->read_min;
-				#endif
-
-					/*Close clients that are too slow*/
-					if (NW_CALL(r->rb < min_read))
+				else 
+				{
+					//Close clients that are too slow
+					if (NW_CALL( r->rb < min_read ))
 						handle(ERR_READ_BELOW_THRESHOLD);
 
 					/*Call user read handler*/
-					uhandle(NW_AT_READ);	
+					uhandle(NW_AT_READ);
 
 					/*HANDLE - Set retries when receiving TCP*/
 					if (NW_CALL( r->stage != NW_AT_READ )) {
 						r->client->events = POLLWRNORM;
 					}
-					else { 
-						if (NW_CALL((r->recv_retry += 1) < s->recv_retry)) {
-							/*Set event on the newest descriptor*/
+					else 
+					{
+						if (NW_CALL( ++r->recv_retry >= s->recv_retry)) {
+							handle(ERR_READ_MAX_READ_RETRY_REACHED);
+						}
+						else 
+						{ /*Set event on the newest descriptor*/
 							r->client->events = POLLRDNORM;
 							continue;
 						}
-						else {
-							handle(ERR_READ_MAX_READ_RETRY_REACHED);
-						}
 					}
 				} /*(NW_CALL( (rb = read(r->client->fd, &r->request[0], 6400)) == -1 ))*/
+			#ifdef NW_QUEUE_READS
+				if ( maxi == 6 ) { wtf( s, maxi ); exit( 0 ); }
+			#endif
 			} /*(NW_CALL( r->client->revents & (POLLRDNORM | POLLERR) ))*/ 
 
-		#ifndef NW_SKIP_PROC
-			//if (r->client->revents & (POLLWRNORM | POLLERR) || r->stage == NW_AT_PROC) {
-			if (NW_CALL( r->stage == NW_AT_PROC )) {
-				/*Build the response*/ 
-				uhandle(NW_AT_PROC);	
-				r->stage = NW_AT_WRITE;
-				r->client->events = POLLWRNORM; 
-				continue;
-			}
+		#ifdef NW_QUEUE_READS
+			continue;
 		#endif
 
-			if (NW_CALL( r->client->revents & (POLLWRNORM | POLLERR) && r->stage == NW_AT_WRITE )) {
-				/*Write the response to socket*/
-				stream[s->stream].write(r);
 
-				/*Handle errno*/
-				if (NW_CALL( r->sb == -1 )) {
-					switch (errno) {
-						case EAGAIN: /*This shoudn't happen, but if it does...*/
-							handle(ERR_WRITE_EGAIN);
-						case EBADF:      /*Peer closed early, why is it here?*/
-							reset_recvr(r);
-							handle(ERR_WRITE_EBADF);
-						case EFAULT:   /*I don't have any more space to write*/
-							reset_recvr(r);
-							handle(ERR_WRITE_EFAULT);
-						case EFBIG:             /*I can't send this much data*/
-							reset_recvr(r);
-							handle(ERR_WRITE_EFBIG);
-						/*In these cases, I have little choice but to close the peer*/
-						case EDQUOT: 
-							reset_recvr(r);
-							handle(ERR_WRITE_EDQUOT);
-						case EINVAL:
-							reset_recvr(r);
-							handle(ERR_WRITE_EINVAL);
-						case EIO:
-							reset_recvr(r);
-							handle(ERR_WRITE_EIO);
-						case ENOSPC:
-							reset_recvr(r);
-							handle(ERR_WRITE_ENOSPC);
-						case EINTR:
-							reset_recvr(r);
-							handle(ERR_WRITE_EINTR);
-						case EPIPE:
-							reset_recvr(r);
-							handle(ERR_WRITE_EPIPE);
-						case EPERM: /*I can't write, b/c another process disallowed it*/
-							reset_recvr(r);
-							handle(ERR_WRITE_EPERM);
-						/*case EDESTADDREQ: //TODO: GCC complains.  Why?
-							handle(ERR_WRITE_EDESTADDREQ); 
-							close_fds(i); */
-						default:
-							break;		
-					}
-				}
-				else if (r->sb == 0) {
-					reset_recvr(r);
-					handle(ERR_WRITE_CONN_CLOSED_BY_PEER);
-				}
-				else {
-				#ifdef NW_MIN_ACCEPTABLE_WRITE
-					int min_write = NW_MIN_ACCEPTABLE_WRITE;
-				#else
-					int min_write = s->write_min;
-				#endif
+		#ifdef NW_SKIP_PROC
+		#else
+			if (NW_CALL( r->stage == NW_AT_PROC )) 
+			{
+				//Build the response, but I need to handle errors...
+				uhandle(NW_AT_PROC);
+				connCount ++;
+				r->stage = NW_AT_WRITE;
+				r->client->events = POLLWRNORM; 
+			#ifdef NW_QUEUE_PROCS
+				if ( maxi == 6 ) { wtf( s, maxi ); exit( 0 ); }
+			#endif
+				continue;
+			}
+		 #ifdef NW_QUEUE_PROCS
+			continue;
+		 #endif
+		#endif
 
-					/*Close clients that are too slow*/
+
+		#ifdef NW_SKIP_WRITE
+		#else
+			if (NW_CALL( r->client->revents & POLLWRNORM && r->stage == NW_AT_WRITE )) 
+			{
+				if (NW_CALL( (error  = nw_write( r ) ))) {
+					handle ( error );
+				}
+			#ifdef NW_QUEUE_WRITES
+				if ( maxi == 6 ) { wtf( s, maxi ); exit( 0 ); }
+			#else
+				else 
+				{
+					//Close clients that are too slow
 					if (NW_CALL( r->sb < min_write ))
 						handle(ERR_WRITE_BELOW_THRESHOLD);
 		
-					/*Perform whatever handler*/
-					uhandle(NW_AT_WRITE);
+					//Perform whatever handler
+					uhandle( NW_AT_WRITE );
+SHOWDATA( "error:         %d\n", error );
+SHOWDATA( "current stage: %s\n", GETSTAGE( r->stage ) );
 
 					/*Check if all data came off*/
-					if (NW_CALL( r->stage == NW_COMPLETED )) {
+					if (NW_CALL( r->stage == NW_COMPLETED )) 
+					{
 						uhandle(NW_COMPLETED);
-					#ifndef NW_KEEP_ALIVE
 						close(r->client->fd);
 						r->client->fd = -1;
-					#endif
 						reset_recvr(r);	
 					}
-					else { 
+					else 
+					{
 						/*Set event on the newest descriptor or die with an error*/
 						if (NW_CALL( (r->send_retry += 1) < s->send_retry )) {
 							r->client->events = POLLWRNORM;
@@ -707,7 +867,23 @@ _Bool activate_selector (Selector *s) {
 						}
 					}
 				}
+			#endif
+
+			#ifdef NW_QUEUE_WRITES
+				SHOWDATA( "error before exit:    %d\n", error );
+				r->stage = NW_COMPLETED;
+				close(r->client->fd);
+				r->client->fd = -1;
+				reset_recvr( r );
+			#endif
 			}
+		#endif
+
+		#ifdef NW_SKIP_ERR /*Bad idea...*/
+			if (NW_CALL( r->client->revents & POLLERR ))
+			{
+			}
+		#endif
 		}/*for*/
 	}/*for*/
 	return 1;

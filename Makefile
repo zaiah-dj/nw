@@ -1,13 +1,14 @@
 include config.mk
 NAME = nw
 TEST = test-nw
-SRC = lite.c nw.c $(TEST).c
+SRC = buff.c lite.c nw.c
 OBJ = ${SRC:.c=.o}
+RUNARGS = ./test-http
 #if 0
 #BONUS POINTS: Make the cpp run on the Makefile to chop your dev targets when packaging.
 VERSION_MAJOR=0
 VERSION_MINOR=2
-IGNORE = $(ALIAS) archive vendor
+IGNORE = $(ALIAS) archive
 AR = tar
 ARFLAGS = czf
 ARCHIVEDIR = ..
@@ -22,27 +23,33 @@ COMMIT = *.c *.h README.md CHANGELOG
 CLEAN = $(NAME)
 .PHONY: all clean debug echo http archive
 #else
-CLEAN = $(NAME) $(TEST) *.o *.exe *.out *.stackdump *.swp *.swo
+CLEAN = $(NAME) test-http test-nw *.o *.exe *.stackdump *.swp *.swo
 .PHONY: pkg debug leak commit permissions restore-permissions backup archive
 #endif
 
+# Build all requested targets
+main: nw http run
+main:
+	@printf ''>/dev/null
+
+# Run it
+run:
+	@echo ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer $(RUNARGS)
+	@ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer $(RUNARGS)
+	
 # Build the library and it's tests
-main: $(OBJ)
-main: build
+nw: $(OBJ) $(TEST).o
+	@echo $(CC) -o $(TEST) $^ $(CFLAGS)
+	@$(CC) -o $(TEST) $^ $(CFLAGS)
 
 # Build the http example
-http: OBJ = lite.o nw.o test-http.o
 http: TEST = test-http
-http: lite.o nw.o test-http.o
-http: build
-
-# Run any build
-build:
-	@echo CC -o $(TEST) $(OBJ) $(CFLAGS)
-	@$(CC) -o $(TEST) $(OBJ) $(CFLAGS)
+http: $(OBJ) test-http.o
+	@echo $(CC) -o test-http $^ $(CFLAGS)
+	@$(CC) -o test-http $^ $(CFLAGS)
 
 .c.o:
-	@echo CC $<
+	@echo $(CC) -c ${CFLAGS} $<
 	@${CC} -c ${CFLAGS} $<
 
 clean:
@@ -74,14 +81,14 @@ pkg:
 	@rm -rf $(PKGNAME)
 
 # Debug target
-debug: main
+debug: nw 
 debug:
-	$(DB) $(DBFLAGS)
+	$(DB) $(DBFLAGS) $(RUNARGS)
 
 # Leak check target
-leak: main
+leak: nw 
 leak:
-	$(LC) $(LCFLAGS)
+	$(LC) $(LCFLAGS) $(RUNARGS)
 
 # Git commits
 commit:
