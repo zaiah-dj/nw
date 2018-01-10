@@ -298,4 +298,18 @@ whatever.h:
 #define MAX_OPEN_FILES      256  	//How many files can I have open at once?
 #define READ_TO_FILE        0    	//When reading, use a file and stream
 #define READ_TO_BUF         1    	//When reading, use a buffer
+#	-DNW_FOLLOW     - Print each branchable call as the program passes 
+#    through execution.
+#	-DNW_VERBOSE    - Print each error message to stderr if anything fails.
+#	-DNW_KEEP_ALIVE - Define whether or not to leave connections open 
+#    after NW_COMPLETED is reached.
+#	-DNW_SKIP_PROC  - Define whether or not to skip the processing step 
+#    of a connection. 
+# -DNW_MIN_ACCEPTABLE_READ   - Define a floor for the number of bytes 
+#    received during read and drop the connection if it's not reached.
+# -DNW_MIN_ACCEPTABLE_WRITE  - Define a floor for the number of bytes 
+#    received during write and drop the connection if it's not reached.
+#	-DNW_LOCAL_USERDATA  - Compile with space for local userdata.
+#	-DNW_GLOBAL_USERDATA - Compile with space for global userdata.
+#	-DNW_CATCH_SIGNAL    - Listen for signals...
 </pre>

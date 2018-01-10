@@ -628,7 +628,7 @@ SHOWDATA( "rq: => %p vs rs: => %p\n", (void *)&j->_request, (void *)&j->_respons
 		fprintf( stderr,
 			"%-5d;%-5d;%-5d;%-7d;%-7s;%-7d;%-7d;%-15p;%-15p;%-15p\n",
 			j->client->fd, j->recvd, j->sent, j->len, GETSTAGE(j->stage), 
-			bf_written( &j->_request ), bf_written( &j->_response ), bf_data( &j->_request ), bf_data( &j->_response ), j->client );
+			bf_written( &j->_request ), bf_written( &j->_response ), bf_data( &j->_request ), bf_data( &j->_response ), (void *)j->client );
 	}
 }
 
