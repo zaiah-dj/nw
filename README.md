@@ -10,20 +10,17 @@ nw is a two file library for managing network messages using non-blocking socket
 Libraries like libevent and libuv will outperform nw on raw speed, but nw aims to be 
 simpler to use than libevent or libuv by adhering to some simple goals.
 
-<ul>
-<li>1. Be useful with two files (nw.c and nw.h), one object (nw.o)</li>
-<li>2. Operate well in both single threaded and multi threaded environments</li>
-<li>3. Do not try to run on every Unix known to man</li>
-<li>4. Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)</li>
-<li>5. Focus on the network (UDP and TCP, not really worried about IPC)</li>
-</ul>
-
-We are almost there, as only items 1 and 5 need to be worked on a bit more.
-
+<ol>
+<li>Be useful with two files (nw.c and nw.h), one object (nw.o)</li>
+<li>Operate well in both single threaded and multi threaded environments</li>
+<li>Do not try to run on every Unix known to man</li>
+<li>Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)</li>
+<li>Focus on the network (UDP and TCP, not really worried about IPC)</li>
+</ol>
 
 Dependencies
 ------------
-nw has only one real dependency.  poll().  It's on most <code>*nix*</code> systems and will give you a nice level of performance right out of the box.  See `man poll` for more information.
+nw has only one real dependency: poll().  It can be found on most Unix systems and will give you a nice level of performance right out of the box.  See `man poll` for more information.  Windows is another story.
 
 Also, nw relies on a part of another library of mine titled 'lite'.  I have embedded the useful code within this library to stick to the two file goal above.  Eventually, not even this will be needed to get the library working.
 
@@ -51,8 +48,9 @@ Usage
 Using nw in your application is pretty simple. Unfortunately, I only 
 have directions for C right now, as I have not had time to test with C++.
 
-<ul>
-1. Declare and define a socket 
+<ol>
+<li>
+Declare and define a socket 
 <pre>
 	//C:
 	Socket sk   = { 
@@ -62,32 +60,43 @@ have directions for C right now, as I have not had time to test with C++.
 		.hostname = "localhost"// Choose a hostname
 	};
 </pre>
+</li>
 
-2. Open a socket and bind and listen if successful
+<li>
+Open a socket and bind and listen if successful
 <pre>
 	//C:	
 	//Notice how we can chain these together
 	if ( !socket_open(&sock) || !socket_bind(&sock) || !socket_listen(&sock) )
 		return socket_error(&sock);  
 </pre>
+</li>
 
-3. Check and initialize the socket structure
+
+<li>
+Check and initialize the socket structure
 <pre>
 	if (!initialize_selector(&sel, &sock)) //&l, local_index))
 		return nw_err(&sel);
 </pre>
+</li>
 
-4. Start a non-blocking server loop
+<li>
+Start a non-blocking server loop
 <pre>
 	if (!activate_selector(&sel))
 		return nw_err(&sel);
 </pre>
+</li>
 
-5. Test that all is well.
+
+<li> Test that all is well.
+<p>
 	Our application is not doing anything useful at the moment.  It is just an
 	open drain waiting for water. (Or more technically speaking, an open wire
 	waiting for digits.)  Running the following with Bash should let you see how it
 	works and test that non-blocking sockets are working as they should.
+</p>
 
 <pre>	
 	#/bin/sh -
@@ -95,11 +104,13 @@ have directions for C right now, as I have not had time to test with C++.
 		curl http://localhost:2000 &
 	done
 </pre>
+</li>
 
-
-6. Define actions.
+<li>Define actions.
+<p>
 	Now we can define "actions" for our application to take at certain points
 	in the request-response chain.  nw breaks this chain into 4 steps:
+</p>
 
 <pre>
 	NW_AT_READ      - The stage immediately after nw reads a 
@@ -120,6 +131,7 @@ have directions for C right now, as I have not had time to test with C++.
                     used and you would like to send more 
                     data. 
 </pre>
+</li>
 
 
 Customization
