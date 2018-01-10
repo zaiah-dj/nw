@@ -3,8 +3,7 @@ nw
 The simple network loop.
 
 
-Summary & Horn Tootin'
-----------------------
+## Summary
 nw is a two file library for managing network messages using non-blocking sockets.
 
 Libraries like libevent and libuv will outperform nw on raw speed, but nw aims to be 
@@ -18,15 +17,23 @@ simpler to use than libevent or libuv by adhering to some simple goals.
 <li>Focus on the network (UDP and TCP, not really worried about IPC)</li>
 </ol>
 
-Dependencies
-------------
+
+## Dependencies
 nw has only one real dependency: poll().  It can be found on most Unix systems and will give you a nice level of performance right out of the box.  See `man poll` for more information.  Windows is another story.
 
 Also, nw relies on a part of another library of mine titled 'lite'.  I have embedded the useful code within this library to stick to the two file goal above.  Eventually, not even this will be needed to get the library working.
 
 
-Compiling
----------
+## Usage
+
+Using nw in your application is pretty simple. Unfortunately, I only 
+have directions for C right now, as I have not had time to test with C++.
+
+
+### Compiling
+
+To compile `nw` for your own apps, do the following:
+
 <p>
 <h3>Linux</h3>
 <code>gcc -Wall -std=c99</code> should yield the library you need.  If you do run into any build errors, please notify me at ramar.collins@gmail.com or send me a pull request.
@@ -43,46 +50,77 @@ Windows has poll() support now, but internet lore tells me this was not always t
 </p>
 
 
-Usage
------
-Using nw in your application is pretty simple. Unfortunately, I only 
-have directions for C right now, as I have not had time to test with C++.
+
+### Example
+
+Below you can see some example code on how to actually use `nw` as a networking backend.
+The following example shows you how to set up a TCP listener on port 2000.
 
 <ol>
 <li>
-Declare and define a socket 
+Declare and define a Socket.
+
+<p>
+So, whenever the term Socket is read in this manual, realize that I'm not speaking about an actual file that you can send and receive data packets over.   In this library, the term 'Socket' refers to a datatype that serves as a template for a connection you would like to initiate.  For example, you can tell the library that you intend to make a server that only listens for UDP messages from a certain port.  The C code for it is below:
+</p>
+
 <pre>
-	//C:
 	Socket sk   = { 
-		.server   = 1,         // 'True' means we want a server
-		.proto    = "tcp"      // Select TCP, not UDP or IPC
-		.port     = [0-65535]  // Choose a port
-		.hostname = "localhost"// Choose a hostname
+		.server   = 1,          // 'True' means we want a server, 'False' makes a client
+		.proto    = "tcp",      // Select TCP, not UDP
+		.port     = 2000,       // Choose a port from 1 to 65534
+		.hostname = "localhost" // Choose a hostname
 	};
 </pre>
 </li>
 
 <li>
 Open a socket and bind and listen if successful
+
+<p>
+In Unix-like systems, creating a socket is, frankly, a pain in the ass.  There are tons of flags and behaviors that you need to keep track of that really won't matter to you if you're not planning doing anything particularly unusual with the connection.
+</p>
+
+<p>
+Also notice that you <b>don't</b> need to check errno when using this library.  Each of the functions was written to return either true or false depending on whether or not it was successful.
+</p>
+
 <pre>
-	//C:	
 	//Notice how we can chain these together
 	if ( !socket_open(&sock) || !socket_bind(&sock) || !socket_listen(&sock) )
-		return socket_error(&sock);  
+	{
+		fprintf( stderr, "Couldn't create socket.\n" );
+		return 0;
+	}
 </pre>
+
+<p>
+NOTE: WebSockets and other bi-directional communication schemes would count as unusual in my opinion.  These protocols really <i>aren't</i> why `nw` was written.  So if that's your need, this is probably not the library you're looking for.
+</p>
+
 </li>
 
 
 <li>
 Check and initialize the socket structure
+
+<p>
+Unfortunately, we are still writing in C and zero'ing out and initializing data is still a task I have to delegate to you.  Fortunately, this simple function makes it really easy for you to do.  This function also handles any validation issues that you may have in your code, such as invalid ports or plain errant setup.
+</p>
+ 
 <pre>
-	if (!initialize_selector(&sel, &sock)) //&l, local_index))
+	if (!initialize_selector(&sel, &sock))
 		return nw_err(&sel);
 </pre>
 </li>
 
 <li>
 Start a non-blocking server loop
+
+<p>
+`nw` does not block at all.  It will never set up a blocking server no matter what you do.  Yay. 
+</p>
+
 <pre>
 	if (!activate_selector(&sel))
 		return nw_err(&sel);
@@ -90,12 +128,16 @@ Start a non-blocking server loop
 </li>
 
 
-<li> Test that all is well.
+<li> 
+
+Test that all is well.
 <p>
-	Our application is not doing anything useful at the moment.  It is just an
-	open drain waiting for water. (Or more technically speaking, an open wire
-	waiting for digits.)  Running the following with Bash should let you see how it
-	works and test that non-blocking sockets are working as they should.
+	If you've gotten this far and have compiled the program, you'll find that it does nothing but tell you which port it is running on.   But hey, my friend, you'd be mistaken.  Because there is an invisible server running via port 2000 that is just waiting on you to send it something...
+</p>
+
+<p>
+	You can run the following script via Bash to see how it works.
+	You can even test that those non-blocking sockets are actually non-blocking working as they should.
 </p>
 
 <pre>	
@@ -104,34 +146,127 @@ Start a non-blocking server loop
 		curl http://localhost:2000 &
 	done
 </pre>
-</li>
 
-<li>Define actions.
+<p>
+	The above script just asks curl to make a GET request for "/" 10 times.
+</li>
+</ol>
+
+
+## Doing Slightly More Than the Minimum
+
+<p>
+So far, our server is not doing very much except sending back a piddly little message and calling it a day.
+Right, so you just wasted all of your time reading through this manual.  Good for you, you've won the "Captain Dingus" award.
+</p>
+
+<p>
+Fortunately, there is more to the story.  nw tries pretty hard to abstract the process of network communication.  To make it easy to write apps that can handle networking, nw breaks up the server loop into four distinct parts.  This way, you don't even have to write your own event loop.  You are just writing handlers that plug in to said loop at different parts of the process.
+</p>
+
+
+## Handlers
+
 <p>
 	Now we can define "actions" for our application to take at certain points
-	in the request-response chain.  nw breaks this chain into 4 steps:
+	in the request-response chain.  
+</p>
+
+<p>
+	In the theoretical sense, a handler is really just a specific action to follow when a certain condition is met.  For example, let's suppose you want to do more than send my trite little message back to your users.   Perhaps you want to show a picture.  Or maybe you want to be a real web server and handle requests for certain directories on your system.  Or maybe you don't want anybody looking at anything ever, so you decide to automatically '400 Unauthorized' headers in succession.   Perhaps you can serve rudimentary CSS along with this message so that your users can '400 Unauthorized' headers with pages in colors matching each spectrum of the rainbow.   Whatever floats your boat, my friend.
+</p>
+
+<p>
+	In the technical sense, a handler is nothing more than a function pointer.  
+	When writing your own handlers, use the following defintion. 
+	The following snippet shows the declaration you'll need to use when binding custom actions to `nw`.
+<p>
+
+<pre>
+//Always return a \_Bool, works via both C and C++
+\_Bool (\*fn_name) (Recvr \*r, void \*ud, char \*err) 
+</pre>
+
+<p>
+Looks pretty easy, right?  Except, what's that Recvr * thing?   Well, I'm glad you asked.
+</p>
+
+<p>
+The Recvr structure is used by nw to keep track of the status of each request.  To keep it simple, pretty much <i>every</i> possible piece of metadata about an open socket connection is stored here.   I could go into great detail about how much data is stored here, but I'll let the code speak for me this time:
 </p>
 
 <pre>
-	NW_AT_READ      - The stage immediately after nw reads a 
-                    message from a client
-	NW_AT_PROC      - An optional intermediate stage that nw
-							      reaches after successfully reading a 
-                    client's message.  Assumes that no 
-                    further reading is needed.
-  NW_AT_WRITE     - Stage in which message has been sent
-                    from server.  If the message were 
-                    extremely large, one could optionally
-                    send the rest of the message to the
-                    client from this stage.
-	NW_AT_COMPLETED - The message is assumed to be done
-                    at this point.  You can close the
-                    file descriptor or keep it open if
-                    a protocol like WebSockets is being
-                    used and you would like to send more 
-                    data. 
+typedef struct {
+  Socket            child;  //Child file descriptor
+	Stage             stage;  //An enum defining where we are currently in the process
+	int              rb, sb;  //Bytes received at an invocation of the "read loop"
+  int         recvd, sent;  //Total bytes sent or received
+  int                 len;  //Length of message to be sent?
+	int               error;  //Was an error detected?
+
+	//For error messages when everything may fail
+  uint8_t          errbuf[NW_ERROR_BUFFER_LENGTH];  
+
+	//Notice that nw can set a size limit on received requests.
+#ifdef NW_BUFF_FIXED
+  uint8_t        request_[NW_MAX_BUFFER_SIZE];
+  uint8_t       response_[NW_MAX_BUFFER_SIZE];
+#endif
+  uint8_t        *request;
+  uint8_t       *response;
+	
+	//What the client sends goes here
+	Buffer       _request;
+
+	//What you prepare goes here
+	Buffer      _response;
+
+	//...you can skip these...
+	int      sretry, rretry;
+	int          recv_retry;
+	int          send_retry;
+	int          *socket_fd;  //Pointer to parent socket?
+
+	//The original pollfd structure
+	struct pollfd   *client;  //Pointer to currently being served client
+
+#ifndef NW_DISABLE_LOCAL_USERDATA
+	void          *userdata;
+#endif
+
+	//Track the time that a request starts and ends, also 
+	//used to track how long the connection has been opened.
+	struct timespec start;
+	struct timespec end;
+} Recvr;
 </pre>
+
+<li>
+NW_AT_READ
+<p>
+The stage immediately after nw reads a message from a client
+</p>
 </li>
+
+<li>
+NW_AT_PROC
+<p>An optional intermediate stage that nw reaches after successfully reading a  client's message.  Assumes that no further reading is needed.</p>
+</li>
+
+<li>
+NW_AT_WRITE
+<p>
+Stage in which message has been sent from server.  If the message were extremely large, one could optionally send the rest of the message to the client from this stage.
+</p>
+</li>
+
+<li>
+NW_AT_COMPLETED
+<p>
+The message is assumed to be done at this point.  You can close the file descriptor or keep it open if you are using some kind of protocol that is capable of re-using an open socket.
+</p>
+</li>
+
 
 
 Customization
