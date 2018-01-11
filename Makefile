@@ -1,46 +1,51 @@
-NAME = nw
+NAME = tmnw
 TEST = test-nw
-SRC = buff.c lite.c nw.c
+SRC = single.c tmnw.c
 OBJ = ${SRC:.c=.o}
 RUNARGS = ./test-http
 PREFIX = /usr/local
-ARCHIVEDIR=..
+ARCHIVEDIR = ..
 MANPREFIX = ${PREFIX}/share/man
-DFLAGS = \
-	-DNW_FOLLOW \
-	-DNW_DISABLE_LOCAL_USERDATA \
-	-DNW_VERBOSE
+DFLAGS = -DNW_FOLLOW -DNW_DISABLE_LOCAL_USERDATA -DNW_VERBOSE
 ADDLFLAGS = ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer
 CLANGFLAGS = -g -Wall -Werror -std=c99 -Wno-unused -fsanitize=address -fsanitize=undefined-trap -fsanitize-undefined-trap-on-error
-CFLAGS=$(CLANGFLAGS)
-INVOKE=ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer
-CC = clang 
+CFLAGS = $(CLANGFLAGS)
+INVOKE = ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer
+CC = clang
 GCCFLAGS = -g -Wall -Werror -Wno-unused -Wstrict-overflow -ansi -std=c99 -Wno-deprecated-declarations -O0 -pedantic-errors
 CFLAGS=$(GCCFLAGS)
 INVOKE=
 CC = gcc
 CLEAN = $(NAME) $(OBJ)
-.PHONY: all clean debug echo http archive
+
+#.PHONY: all clean debug echo http archive
 
 # Build all requested targets
-main: nw http run
+main: tmnw http run
 main:
 	@printf ''>/dev/null
 
+lib:
+	$(CC) $(CFLAGS) -c $(NAME).c
+ 
 # Run it
 run:
 	@echo $(INVOKE) $(RUNARGS)
 	@$(INVOKE) $(RUNARGS)
 	
 # Build the library and it's tests
-nw: $(OBJ)
-	@echo $(CC) -o $(TEST) $^ $(TEST).c $(CFLAGS)
-	@$(CC) -o $(TEST) $^ $(TEST).c $(CFLAGS)
+tmnw: tmnw.o
+	@echo $(CC) -o $(TEST) $^ $(TEST).c $(CFLAGS) -DSQROOGE_H
+	@$(CC) -o $(TEST) $^ $(TEST).c $(CFLAGS) -DSQROOGE_H
 
 # Build the http example
-http: $(OBJ)
-	@echo $(CC) -o test-http $^ test-http.c $(CFLAGS)
-	@$(CC) -o test-http $^ test-http.c $(CFLAGS)
+http: tmnw.o
+	@echo $(CC) -o test-http $^ test-http.c $(CFLAGS) -DSQROOGE_H
+	@$(CC) -o test-http $^ test-http.c $(CFLAGS) -DSQROOGE_H
+
+# Single is the last thing needed
+single.o:
+	$(CC) $(CFLAGS) -DSQROOGE_H -c single.c 
 
 # Objects
 .c.o:
@@ -88,17 +93,20 @@ change:
 	@rm CHANGELOG.ACTIVE CHANGELOG.USER
 	@mv CHANGELOG.NEW CHANGELOG
 
-# Extract a test for Bash (this will freeze if TESTNAME is not spec'd)
-bash:	START=`nl -b a $(NAME).h | sed -n '/begin $(TESTNAME) test/p' | awk '{ print $$1 + 1 }'`
-bash:	END  =`nl -b a $(NAME).h | sed -n '/end $(TESTNAME) test/p' | awk '{ print $$1 - 1 }'`
-bash:
-	@sed -n $(START),$(END)p $(NAME).h | /bin/bash -
-	
-# ??? test 
+# Test that POST requests can be received
 post: TESTNAME=post
-post: bash
+post:
+	curl --verbose --request POST \
+		--form my_file=@tests/red52x35.jpg \
+		--form paragraph="Flame flame flame" \
+		--form author="Antonio R. Collins II" \
+		http://localhost:2000 
 
-# Fork test
+# Test that forked requests work
 fork: TESTNAME=fork
-fork: bash
+fork:
+	test -d tests || mkdir tests
+	for n in `seq 1 32`; do \
+		wget -o tests/index.${n}.html http://localhost:2000 & 
+	done 
 #endif

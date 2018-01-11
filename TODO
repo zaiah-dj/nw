@@ -1,5 +1,0 @@
-
-left off at line 705 in nw.c
-
-where that continue goes matters...
-add a define to cause it to run that way

@@ -9,10 +9,7 @@
 
  This is the real reason why nw exists.  
  * ------------------------------------------- */
- 
-#include "lite.h"
-#include "nw.h"
-#include "debug.h"
+#include "tmnw.h"
 
 /*Keep it thin*/
 #define HTTP_405 \

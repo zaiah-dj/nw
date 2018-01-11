@@ -55,63 +55,149 @@
 
 	
  * ------------------------------------- */
-#include <poll.h>
-#include "buff.h"
+#ifndef _WIN32
+ #define _POSIX_C_SOURCE 200809L
+#endif
 
-#define LITE_BUFFER
+#if 0
+ #include "single.h"
+#else
+ #include <stdio.h>
+ #include <string.h>
+ #include <time.h>
+ #include <errno.h>
+ #include <inttypes.h>
+ #include <poll.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+#endif
 
 #ifndef NW_H
 #define NW_H
 
+#ifndef SINGLE_H 
+ #ifndef SOCKET_H 
+ //Check if we're on Linux, because the POSIX problem always shows up
+ #include <netinet/in.h>
+ #include <fcntl.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
+ #include <arpa/inet.h>
+ #include <netdb.h>
+
+	typedef struct
+	{
+		_Bool server    ;
+		char *hostname  ;
+		char *proto     ;
+		char *service   ;    //A string representation of service 
+		char  opened    ;
+		char  _class    ;    //Type of socket
+		char  portstr[6];
+		char  address
+	[INET6_ADDRSTRLEN];    //Address gets stored here
+
+		int port       ;
+		int fd         ;
+		int clifd      ;
+		int domain     ;     //AF_INET, AF_INET6, AF_UNIX
+		int protocol   ;     //Transport protocol to use.
+		int conntype   ;     //TCP, UDP, UNIX, etc. (sock_stream)
+		int err        ;
+		int connections;     //How many people have tried to connect to you?
+		int bufsz      ;     //Size of read buffer 
+		int backlog    ;     //Number of queued connections. 
+		int waittime   ;     //There is a way to query socket, but do this for now to ensure your sanity.
+
+	#if 0
+		Buffer *buffer;      //A buffer
+	#endif
+		struct addrinfo 
+							hints,     //Hints on addresses
+							 *res;     //Results of address call.
+
+		/* Server information -  used by bind() */
+		struct sockaddr 
+					 *srvaddr,     // Server address structure */ 
+					 *cliaddr;     // Client address structure */
+		struct sockaddr_in 
+				tmpaddrinfo,
+			 *cliaddrinfo,     //Client's address information 
+			 *srvaddrinfo;     //Server's address information 
+		socklen_t 
+				 cliaddrlen,     //Client
+				 srvaddrlen;     //Server
+		size_t addrsize;     //Address information size
+		void *ssl_ctx  ;                  /* If SSL is in use, use this */
+	} 
+	Socket;
+
+	int socket_connect (Socket *self, const char *hostname, int port);
+	 void socket_free (Socket *self);
+	_Bool socket_open (Socket *sock);
+	 void socket_printf (Socket *sock);
+	_Bool socket_accept (Socket *sock, Socket *new);
+	_Bool socket_tcp_recv (Socket *sock, uint8_t *msg, int *len);
+	_Bool socket_tcp_rrecv (Socket *sock, uint8_t *msg, int get, uint32_t *len);
+	_Bool socket_tcp_send (Socket *sock, uint8_t *msg, uint32_t len);
+	void socket_addrinfo(Socket *self);
+	_Bool socket_bind(Socket *self);
+	_Bool socket_listen(Socket *self);
+	_Bool socket_shutdown(Socket *self, char *type);
+	_Bool socket_close(Socket *self);
+	_Bool socket_recv(Socket *self); 
+	_Bool socket_send(Socket *self, char *msg, unsigned int length); 
+	void socket_release(Socket *self);
+ #endif
+
+ #ifndef BUFF_H
+	typedef struct 
+	{
+		uint8_t *buffer;
+		int size;
+		int written;
+		int fixed;
+		int error;
+	} Buffer;
+
+	Buffer *bf_init (Buffer *b, uint8_t *mem, int size);
+	void bf_setwsize (Buffer *b, int size); 
+	int bf_append (Buffer *b, uint8_t *s, int size); 
+	int bf_prepend (Buffer *b, uint8_t *s, int size); 
+	void bf_free (Buffer *b); 
+	const char *bf_err (Buffer *b);
+	int bf_written (Buffer *b) ;
+	uint8_t *bf_data (Buffer *b) ;
+	void bf_softinit (Buffer *b) ;
+ #endif
+#endif
+
+
 /*nw has a few sensible defines*/
-#ifndef NW_ERROR_BUFFER_LENGTH
- #define NW_ERROR_BUFFER_LENGTH      4096 
-#endif
-#ifndef NW_MIN_ACCEPTABLE_READ
- #define NW_MIN_ACCEPTABLE_READ        32
-#endif
-#ifndef NW_MIN_ACCEPTABLE_WRITE
- #define NW_MIN_ACCEPTABLE_WRITE       32
-#endif
-#ifndef NW_MAX_ACCEPTABLE_READ
- #define NW_MAX_ACCEPTABLE_READ      4096
-#endif
-#ifndef NW_MAX_ACCEPTABLE_WRITE
- #define NW_MAX_ACCEPTABLE_WRITE     4096
-#endif
-#ifndef NW_RETRY_READ
- #define NW_RETRY_READ                  3
-#endif
-#ifndef NW_RETRY_WRITE
- #define NW_RETRY_WRITE                 3
-#endif
-#ifndef NW_MAX_EVENTS
- #define NW_MAX_EVENTS                100
-#endif
-#ifndef NW_MAX_BUFFER_SIZE
- #define NW_MAX_BUFFER_SIZE         64000 
-#endif
-#ifndef NW_STREAM_TYPE
- #define NW_STREAM_TYPE               "?"
-#endif
-#ifndef NW_BUFF_FIXED
- #define NW_BUFF_DYNAMIC
-#endif
-#if 0
-#ifndef NW_DISABLE_LOCAL_USERDATA
- #define NW_DISABLE_LOCAL_USERDATA    0 
-#endif
-#ifndef NW_DISABLE_GLOBAL_USERDATA
- #define NW_DISABLE_GLOBAL_USERDATA   0 
-#endif
-#endif
-//Choose whether or not to queue writes
-#ifdef NW_QUEUE_WRITES
- #define NW_QUEUE_WRITE_DIRNAME "local"
-#endif
+#define NW_MIN_ACCEPTABLE_READ      32
+#define NW_MIN_ACCEPTABLE_WRITE     32
+#define NW_MAX_ACCEPTABLE_READ    4096
+#define NW_MAX_ACCEPTABLE_WRITE   4096
+#define NW_RETRY_READ                3
+#define NW_RETRY_WRITE               3
+#define NW_MAX_EVENTS              100
+#define NW_MAX_BUFFER_SIZE       64000 
+#define NW_STREAM_TYPE             "?"
+//#define NW_DISABLE_LOCAL_USERDATA    0 
+//#define NW_DISABLE_GLOBAL_USERDATA   0 
+
+/*nw's "static" defines, so I don't forget what goes where*/
+enum { NW_RECV = 0, NW_SEND };
+
+/*stream selections*/
+typedef enum 
+{ 
+	NW_STREAM_BUF = 0, 
+	NW_STREAM_FD,
+	NW_STREAM_PIPE
+} Stream;
 
 
-//Follow program flow
 #ifdef NW_FOLLOW
  #define NW_CALL(c) \
 	(c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
@@ -120,7 +206,8 @@
 	c
 #endif
 
-//Return error messages and a code at the same time.
+
+/*Return error messages and a code at the same time.*/
 #ifdef NW_VERBOSE
  #define nw_err(c, ...) \
 	(fprintf(stderr, __VA_ARGS__) ? c : 0)
@@ -129,32 +216,21 @@
 	c
 #endif
 
-//Reset read event
+/*Reset read event*/
 #define nw_reset_read() \
 	r->client->events = POLLRDNORM
 
-//Reset write event
+/*Reset write event*/
 #define nw_reset_write() \
 	r->client->events = POLLWRNORM
 
-//Reset the receiver
+/*Reset the receiver*/
 #define nw_reset_recvr() \
 	memset(r, 0, sizeof(Recvr)); close((&r->client)->fd); (&r->client)->fd = -1
 
-//Get fd without worrying about pollfd structure
+/*Get fd without worrying about pollfd structure*/
 #define nw_get_fd() \
 	r->client->fd
-
-/*nw's "static" defines, so I don't forget what goes where*/
-enum { NW_RECV = 0, NW_SEND };
-
-/*stream selections*/
-typedef enum 
-{
-	NW_STREAM_BUF = 0, 
-	NW_STREAM_FD,
-	NW_STREAM_PIPE
-} Stream;
 
 /*Error map or a big struct?*/
 enum {
@@ -210,9 +286,7 @@ enum {
 };
 
 
-//Datatype to track where nw is in the request->reply process
-typedef enum 
-{
+typedef enum {
 	NW_AT_READ = 0,   /*The current connection is read ready.*/
 	NW_AT_PROC,       /*The current connection is processing a response*/
 	NW_AT_WRITE,      /*The current conenction is write ready*/
@@ -223,15 +297,35 @@ typedef enum
 
 
 
-//Datatype to manage buffering of receipt and relay of network messages
-typedef struct {
+/*A buffer structure*/
+#if 0
+static const char *Buff_errors[] = {
+	[ERR_BUFF_REALLOC_FAILURE] = "Buffer reallocation failure",
+	[ERR_BUFF_OUT_OF_SPACE] = "Fixed buffer is out of space.",
+};
+#endif
+
+#if 0
+typedef struct Buffer Buffer;
+struct Buffer {
+	uint8_t *buffer;
+	int size;
+	int written;
+	int fixed;
+	int error;
+};
+#endif
+
+/*Here is a similar structure*/
+typedef struct 
+{
   Socket            child;
 	Stage             stage;
-	int              rb, sb;  //Bytes received at an invocation of the "read loop"
-  int         recvd, sent;  //Total bytes sent or received
-  int                 len;  //Length of message to be sent?
-	int               error;  //Was an error detected?
-  uint8_t          errbuf[NW_ERROR_BUFFER_LENGTH];  //For error messages when everything may fail
+	int                  rb, 
+                       sb,  //Bytes received at an invocation of the "read loop"
+                    recvd, 
+                     sent;  //Total bytes sent or received
+  uint8_t          errbuf[2048];  //For error messages when everything may fail
 #if 0
   int          request_fd;  
   int         response_fd;
@@ -255,10 +349,12 @@ typedef struct {
 	//This allows nw to cut connections that have been on too long
 	struct timespec start;
 	struct timespec end;
+	int      status; 
+	int len;
 } Recvr;
 
 
-//Datatype to control event handlers
+/*Structure to control event handlers*/
 typedef struct { 
 	_Bool (*exe)(Recvr *r, void *ud, char *err);
 	enum {
@@ -272,7 +368,7 @@ typedef struct {
 } Executor;
 
 
-//Dataype to control "stream" handlers
+/*Structure to control "stream" handlers*/
 typedef struct {
 	/*Should support writing to file or to memory*/ 
 	//_Bool (*exe)(void *in, void *out);
@@ -281,13 +377,19 @@ typedef struct {
 } Streamer;
 
 
-//Datatype to set up a server or client
+/*Structure for setting up the loop*/
 typedef struct 
 {
-	int       read_min   ,  /*How much data needs to be read at a time?*/
-	          write_min  ;  /*How much data needs to be written at a time?*/
-	int8_t    recv_retry ,  /*Number of times to retry reading*/
-	          send_retry ;  /*Number of times to retry sending*/
+#if 0
+	int       min[2]     ;  /*min read is first index 0, min write is second index 1*/
+	int       max[2]     ;  /*max read is first index 0, max write is second index 1*/
+	int       retry[2]   ;  /*read retry is first index, write is second*/
+#else
+	int       read_min   ;  /*How much data needs to be read at a time?*/
+	int       write_min  ;  /*How much data needs to be written at a time?*/
+	int8_t    recv_retry ;  /*Number of times to retry reading*/
+	int8_t    send_retry ;  /*Number of times to retry sending*/
+#endif
 	Stream    stream     ;  /*Which stream to use*/
 	Executor *errors,       /*Error handlers*/
            *runners    ;  /*Connection life cycle handlers*/
@@ -317,8 +419,14 @@ typedef struct
 } Selector;
 
 
-//All forward declarations
 extern Executor _nw_errors[ERR_END_OF_CHAIN + 1];
+#if 0
+Buffer *bf_init (Buffer *b, uint8_t *mem, int size);
+void bf_setwsize (Buffer *b, int size); 
+int bf_add (Buffer *b, uint8_t *s, int size); 
+void bf_free (Buffer *b); 
+const char *bf_err (Buffer *b);
+#endif
 _Bool initialize_selector (Selector *, Socket *);
 void free_selector (Selector *s);
 _Bool activate_selector (Selector *s); 
@@ -333,5 +441,4 @@ _Bool nw_finish_fd (Recvr *r, void *ud, char *err);
 _Bool nw_reset_fd (Recvr *r, void *ud, char *err);
 _Bool nw_add_read (Recvr *r, uint8_t *msg, int size);
 _Bool nw_add_write (Recvr *r, uint8_t *msg, int size); 
-void nw_set_error (Recvr *r);
 #endif

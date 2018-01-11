@@ -1,12 +1,25 @@
-#include "lite.h"
-#include "nw.h"
+//#include "lite.h"
+#include "tmnw.h"
+
+#define CMP( a, b ) \
+	!strcmp( *argv, a ) || !strcmp( *argv, b ) 
+
 #define HEADER \
 	"HTTP/1.1 200 OK\r\n" \
 	"Content-Type: text/html\r\n" \
 	"Content-Length: %d\r\n\r\n"
+
 #define DIAGNOSTICS_FMT \
 	"%-3s %s listening for connections on %s:%d\n" 
 
+const char usage[] =
+	"Usage: \n"
+	"-t, --tcp     Use TCP packets.          \n"
+	"-u, --udp     Use UDP packets.          \n"
+	"-s, --server  Run in server mode.       \n"
+	"-c, --client  Run in client mode.       \n"
+	"-h, --help    Show help and quit.       \n"
+;
 
 //Read
 _Bool _read (Recvr *r, void *ud, char *err) 
@@ -86,17 +99,6 @@ Executor runners[] = {
 
 
 
-//Options to test.
-Option opts[] = {
-	{ "-t", "--tcp",    "Use TCP packets."          },
-	{ "-u", "--udp",    "Use UDP packets."          },
-	{ "-s", "--server", "Run in server mode."       },
-	{ "-c", "--client", "Run in client mode."       },
-	{ "-h", "--help",   "Show help and quit."       },
-	{ .sentinel=1 }
-};
-
-
 //A 'Selector' defines acceptable behavior for an open network socket.
 Selector  sel = 
 {
@@ -124,21 +126,50 @@ Selector  sel =
 //A 'Socket' defines how I should tell the OS to open a network socket
 Socket sock = 
 { 
-	1,            //Server or client?
-	"tcp",        //TCP or UDP
-	2000,         //What port?
-	"localhost"   //Which address to bind to?
+	1,             //Server or client?
+	"tcp",         //TCP or UDP
+	"localhost",   //Which address to bind to?
+	.port = 2000   //What port?
 };
 
 
 int main(int argc, char *argv[]) 
 {
-	if (argc < 2)
-		opt_usage(opts, "Nothing to do.", 1);
+	if (argc < 2) {
+		fprintf( stderr, "%s\n", usage );
+		return 1;
+	}
 
-	/*TODO: Add better error handling*/
-	if ( !opt_eval(opts, argc, argv) )
-		return (/*errprintf(...) &&*/	1); 
+	while ( *argv )
+	{
+		if ( CMP( "-t", "--tcp" ) )
+		{
+			goto opt;
+		}
+
+		if ( CMP( "-u", "--udp" ) )
+		{
+			goto opt;
+		}
+
+		if ( CMP( "-s", "--server" ) )
+		{
+			goto opt;
+		}
+
+		if ( CMP( "-c", "--client" ) )
+		{
+			goto opt;
+		}
+
+		if ( CMP( "-h", "--help" ) )
+		{
+			goto opt;
+		}
+
+opt:
+		argv++;
+	}
 
 	//Open the socket
 	if (!socket_open(&sock) || !socket_bind(&sock) || !socket_listen(&sock))

@@ -1,3 +1,7 @@
+Wed Jan 10 19:30:20 EST 2018
+	 -After a very long hiatus dealing with networking, I've finally come back to make it work without excess dependencies.
+	 -The solution was to extract the needed functionality from single.[ch] and build it into the library.  A better way to handle this would be to use native networking code.
+
 Sat Feb  4 04:03:01 EST 2017
 	 -Updated nw.h to make defines a little clearer.
 	 -Reorganized nw.c to make all code a bit cleaner.

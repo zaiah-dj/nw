@@ -1,37 +1,380 @@
-/*nw.c - See nw.h for documentation*/
-#include "lite.h"
+#include "tmnw.h"
 #include <poll.h>
-#include "nw.h"
 
-//Include signal handling
 #ifdef NW_CATCH_SIGNAL
  #include <signal.h>
 #endif
 
-//Print a message as we move through branches within the program flow
-#ifdef NW_VERBOSE
- #define NW_LOG(c) \
-	(c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
-#else
- #define NW_CALL(c) \
-	c
+#ifndef SINGLE_H
+ #ifdef NW_DEBUG
+  #define SHOWDATA(...) do { \
+   fprintf(stderr, "%-30s [ %s %d ] -> ", __func__, __FILE__, __LINE__); \
+   fprintf( stderr, __VA_ARGS__ ); \
+   fprintf( stderr, "\n"); } while (0)
+ #else
+  #define SHOWDATA( ... )
+ #endif
+
+enum 
+{
+  ERR_NONE,
+ #ifndef BUFF_H
+  /*Buffer*/
+  ERR_BUFF_ALLOC_FAILURE,
+  ERR_BUFF_REALLOC_FAILURE,
+  ERR_BUFF_OUT_OF_SPACE,
+ #endif
+	ERR_ERR_INDEX_MAX
+};
+
+static const char *__errors[] = 
+{
+  [ERR_NONE] = "No errors",
+ #ifndef BUFF_H
+  /*Buffer*/
+  [ERR_BUFF_ALLOC_FAILURE] = "Buffer allocation failure",
+  [ERR_BUFF_REALLOC_FAILURE] = "Buffer reallocation failure",
+  [ERR_BUFF_OUT_OF_SPACE] = "Fixed buffer is out of space.",
+ #endif
+	[ERR_ERR_INDEX_MAX]        = "No errors",
+};
+
+ #ifndef BUFF_H
+//Initialize a buffer
+Buffer *bf_init (Buffer *b, uint8_t *mem, int size) 
+{
+	memset( b, 0, sizeof (Buffer) );
+	if ( mem )
+	{
+		b->fixed = 1;
+		b->size  = size;	
+		b->buffer = mem; 
+		b->written = 0;
+	}
+	else {
+		b->written = 0;
+		b->size = 0;
+		b->fixed = 0;
+		if ( !(b->buffer = malloc( size )) )
+			return NULL;
+	}
+
+	return b;
+}
+
+
+//This will help "clean" things
+void bf_softinit (Buffer *b)
+{
+	memset( b, 0, sizeof (Buffer) );
+	b->buffer = NULL;
+}
+
+
+//Set the written size if a buffer has data already
+void bf_setwsize (Buffer *b, int size) 
+{
+	b->size = size;
+}
+
+
+
+//Write data to buffer
+int bf_append (Buffer *b, uint8_t *s, int size) 
+{
+	if ( !b->fixed ) {
+		if ((size + b->written) > b->size) 
+		{
+			uint8_t *c = NULL;
+			if ( !(c = realloc( b->buffer, size + b->size )) )
+			{
+				b->error = ERR_BUFF_REALLOC_FAILURE;
+				return 0;
+			}
+			b->size    = size + b->size;
+			b->buffer  = c;		
+		}
+	}
+	else {
+		if ((size + b->written) > b->size) 
+		{
+			b->error = ERR_BUFF_OUT_OF_SPACE;
+			return 0;	
+		}	
+	}
+
+	memcpy( &b->buffer[ b->written ], s, size );
+	b->written += size;
+	return 1;
+}
+
+
+
+//Move data in a buffer
+int bf_prepend (Buffer *b, uint8_t *s, int size)
+{
+	//If it's malloc'd, allocate the new space and move the memory
+	if ( !b->fixed ) {
+		uint8_t *c = NULL;
+		if ( !(c = realloc( b->buffer, size + b->size )) )
+		{
+			b->error = ERR_BUFF_REALLOC_FAILURE;
+			return 0;
+		}
+		b->size    = size + b->size;
+		b->buffer  = c;		
+		memmove( &b->buffer[size], &b->buffer[0], b->written );
+		memcpy( &b->buffer[ 0 ], s, size );
+		b->written += size;
+	}
+
+	//If it's not, check that the buffer has enough and then move
+	return 1;
+}
+
+
+//Get currently written amount
+int bf_written (Buffer *b) {
+	return (b) ? b->written : 0;
+}
+
+
+
+//Get the unsigned char data
+uint8_t *bf_data (Buffer *b) {
+	return (b) ? b->buffer : 0;
+}
+
+
+//Write out errors
+const char *bf_err (Buffer *b) {
+	return __errors[b->error];
+}
+
+//Destroy a buffer's data
+void bf_free (Buffer *b) 
+{
+	if (( b->buffer ) && (!b->fixed)) 
+	{
+		free( b->buffer ); 
+		b->buffer  = NULL;
+		b->size    = 0;
+		b->written = 0;
+		b->error   = 0;
+		b->fixed   = 0;
+	}
+}
+ #endif
+
+ #ifndef SOCKET_H
+//Get the address information of a socket.
+void socket_addrinfo (Socket *sock)
+{
+	//fprintf(stderr, "%s\n", "Getting address information for socket.");
+
+	struct addrinfo *peek; 
+	struct sockaddr_in *ipv4;
+	struct sockaddr_in6 *ipv6;
+	int status = getaddrinfo(sock->hostname, sock->portstr, &sock->hints, &sock->res);
+
+	if (status != 0) 
+	{
+		//err(1, "Could not get address information for this socket.");
+		return;
+	}
+
+	/* Loop through each */
+	for (peek = sock->res; peek != NULL; peek = peek->ai_next) {
+		void *addr;	
+		char *ipver;
+		if (peek->ai_family == AF_INET) {
+			ipv4 = (struct sockaddr_in *)peek->ai_addr;
+			addr = &(ipv4->sin_addr);
+			ipver = "IPv4";
+		}
+		else {
+			ipv6 = (struct sockaddr_in6 *)peek->ai_addr;
+			addr = &(ipv6->sin6_addr);
+			ipver = "IPv4";
+		}
+
+		if (inet_ntop(peek->ai_family, addr, sock->address, sizeof(sock->address)) == NULL)
+			continue;
+	
+		fprintf(stderr, "%s: %s\n", ipver, sock->address);
+		/* Break somewhere after finding a valid address. */
+		break;
+	}
+
+	/* Free this */
+	freeaddrinfo(peek);
+}
+
+
+
+//initialize a socket...
+_Bool socket_open (Socket *sock) 
+{
+	//All of this can be done with a macro
+	sock->addrsize = sizeof(struct sockaddr);
+	sock->bufsz = !sock->bufsz ? 1024 : sock->bufsz;
+	sock->opened = 0;
+	sock->backlog = 500;
+	sock->waittime = 5000;  // 3000 microseconds
+
+	if (!sock->proto || !strcmp(sock->proto, "TCP") || !strcmp(sock->proto, "tcp"))
+	{
+		sock->conntype = SOCK_STREAM;
+		sock->domain   = PF_INET;
+		sock->protocol = IPPROTO_TCP;
+		sock->hostname = (sock->server) ? ((!sock->hostname) ? "localhost" : sock->hostname) : NULL;
+		sock->_class = (sock->server) ? 's' : 'c';
+	}
+	else if (!strcmp(sock->proto, "udp") ||!strcmp(sock->proto, "UDP"))
+	{
+		sock->conntype = SOCK_DGRAM;
+		sock->domain   = PF_INET;
+		sock->protocol = IPPROTO_UDP;
+		sock->hostname = (sock->server) ? ((!sock->hostname) ? "localhost" : sock->hostname) : NULL;
+		sock->_class = (sock->server) ? 's' : 'c';
+	}
+
+	/* Check port number (clients are zero until a request is made) */
+	if (!sock->port || sock->port < 0 || sock->port > 65536) 
+	{
+	//fprintf( stderr, "Invalid port specified." );
+		return 1;
+	}
+
+
+	/* Set up the address data structure for use as either client or server */	
+	if (sock->_class == 's') 
+	{
+		/*there must be a way to do this WITHOUT malloc*/
+		//if ((sock->srvaddrinfo = (struct sockaddr_in *)nalloc(sizeof(struct sockaddr_in), "sockaddr.info")) == NULL)
+		//	return;
+			//return errnull("Could not allocate structure specified.");
+
+		/*This ought to work...*/
+		sock->srvaddrinfo = &sock->tmpaddrinfo;
+		memset(sock->srvaddrinfo, 0, sizeof(struct sockaddr_in));
+		struct sockaddr_in *saa = sock->srvaddrinfo; 
+		saa->sin_family = AF_INET;
+		saa->sin_port = htons(sock->port);
+		(&saa->sin_addr)->s_addr = htonl(INADDR_ANY);
+	}
+	else if (sock->_class == 'c') 
+	{
+		/* Set up the addrinfo structure for a future client request. */
+		struct addrinfo *h; 
+		memset(&sock->hints, 0, sizeof(sock->hints));
+		h = &sock->hints;
+		h->ai_family = sock->domain;
+		h->ai_socktype = sock->conntype;
+	}
+
+	/* Finally, create a socket. */
+	if ((sock->fd = socket(sock->domain, sock->conntype, sock->protocol)) == -1) {
+		return 0;
+	}
+	sock->opened = 1;
+
+	/* Set timeout, reusable bit and any other options */
+	struct timespec to = { .tv_sec = 2 };
+	if (setsockopt(sock->fd, SOL_SOCKET, SO_REUSEADDR, &to, sizeof(to)) == -1) {
+		// sock->free(sock);
+		sock->err = errno;
+		return (0, "Could not reopen socket.");
+	}
+	return 1;
+}
+
+
+
+//Bind to a socket
+_Bool socket_bind (Socket *sock) {
+	//set errno
+	return (bind(sock->fd, (struct sockaddr *)sock->srvaddrinfo, sizeof(struct sockaddr_in)) != -1);
+//		return errsys("Could not bind to socket.");
+}
+
+
+
+//Listen for connections over a socket.
+_Bool socket_listen (Socket *sock)
+{
+	//set errno
+	return (listen(sock->fd, sock->backlog) != -1);
+		//return errsys("Could not listen out on socket.");
+}
+
+
+//Opens a non blocking socket.
+//This function is not a good idea for select I don't think...
+_Bool socket_tcp_recv (Socket *sock, uint8_t *msg, int *len) 
+{
+	int t = 0, 
+      r = 0, 
+      w = ( *len > 0 ) ? *len : 64;
+
+	//If it's -1, die.  If it's less than buffer, die
+	while (1) 
+	{
+		//Error occurred, free or reset the buffer and die
+		if ( (r = read(sock->fd, &msg[ t ], w )) == -1 )
+		{
+			//handle recv() errors...
+			sock->err = errno;
+			return 0;
+		}
+
+		//...
+		if ( !r )
+		{
+			fprintf( stderr, "socket_tcp_recv should be done...\n" );
+			break;
+		}
+
+		t += r;
+	}
+
+	*len = t;
+	return 1;
+}
+
+
+//Accept connections
+_Bool socket_accept (Socket *sock, Socket *new) {
+	/* Clone current socket data */
+	if (!memcpy(new, sock, sizeof(Socket))) {
+		fprintf(stderr, "Could not copy original parent socket data.\n");
+		return 0;
+	}
+
+	/* Accept a connection. */	
+	if ((new->fd = accept(sock->fd, NULL, NULL)) == -1) 
+		return ((sock->err = errno) ? 0 : 0);
+		
+	/* Set socket description */
+	new->_class = 'd';
+	return 1;
+}
+ #endif
 #endif
 
-//Include debugging
-#ifdef NW_DEBUG 
- #define STEP(...) 
- #define SHOWDATA(...)
-#else
- #define STEP(...) do { \
-	fprintf( stderr, "%20s [ %s: %d ]", __func__, __FILE__, __LINE__ ); \
-	getchar(); } while (0)
 
- #define SHOWDATA(...) do { \
-	fprintf(stderr, "%-30s [ %s %d ] -> ", __func__, __FILE__, __LINE__); \
-	fprintf( stderr, __VA_ARGS__ ); } while (0)
+/*Choose dynamic buffers by default*/
+#ifndef NW_BUFF_FIXED
+ #define NW_BUFF_DYNAMIC
 #endif
 
-/*Call logging function*/
+//#define NW_QUEUE_WRITES
+//#undef NW_FOLLOW
+
+#ifdef NW_QUEUE_WRITES
+ #define NW_QUEUE_WRITE_DIRNAME "local"
+#endif
+
 #ifdef NW_VERBOSE 
  #define nw_log(...) \
 	fprintf(stderr, __VA_ARGS__);
@@ -65,7 +408,7 @@
 
 /*Handle errors via the rwp_error_map function pointer table.*/
 #define uhandle(CODE) \
-	if (NW_CALL( (&s->runners[CODE])->exe(r, s->global_ud, (&s->runners[CODE])->err) )) { \
+	if (NW_CALL( ( r->status = (&s->runners[CODE])->exe(r, s->global_ud, (&s->runners[CODE])->err) ) )) { \
 		/*Success*/ \
 		nw_log("%s successful at %s %d.\n", #CODE, __FILE__, __LINE__); \
 		switch ((&s->runners[CODE])->action) { \
@@ -93,20 +436,29 @@
 		} \
 	}
 
-//Reset read event
+/*Print a message as we move through branches within the program flow*/
+#ifdef NW_VERBOSE
+ #define NW_LOG(c) \
+	(c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
+#else
+ #define NW_CALL(c) \
+	c
+#endif
+
+/*Reset read event*/
 #define nw_reset_read() \
 	r->client->events = POLLRDNORM
 
-//Reset write event
+/*Reset write event*/
 #define nw_reset_write() \
 	r->client->events = POLLWRNORM
 
-//Get fd without worrying about pollfd structure
+/*Get fd without worrying about pollfd structure*/
 #define nw_get_fd() \
 	r->client->fd
 
 #ifdef NW_VERBOSE
-//Dump the selector
+/*Dump the selector*/
 void print_selector (Selector *s) 
 {
 	fprintf(stderr, "max_events: %d\n", s->max_events);
@@ -127,7 +479,6 @@ void print_recvr (Recvr *r)
 	fprintf(stderr, "child:       %p\n", (void *)&r->child);
 	fprintf(stderr, "recvd:       %d\n", r->recvd);
 	fprintf(stderr, "sent:        %d\n", r->sent);
-	fprintf(stderr, "len:         %d\n", r->len);
 	fprintf(stderr, "stage:       %d\n", r->stage);
  #if 0
 	fprintf(stderr, "request_fd:  %d\n", r->request_fd);
@@ -155,7 +506,8 @@ void print_recvr (Recvr *r)
 
 
 /*Static list of error codes in text*/
-const char *nw_error_map[] = {
+const char *nw_error_map[] = 
+{
 	[ERR_POLL_INITIAL_ALLOCATOR]        = "File allocation failure.\n",
 	[ERR_POLL_TOO_MANY_FILES]           = "Attempt to open too many files.\n",
 	[ERR_POLL_RECVD_SIGNAL ]            = "Received signal interrupting accept().\n",
@@ -198,6 +550,7 @@ const char *nw_error_map[] = {
 	[ERR_WRITE_MAX_WRITE_RETRY_REACHED] = "Maximum write retry limit reached " \
                                         "for this client\n", 
 };
+
 
 /*Static list of loop process codes in text*/
 const char *runner_error_map[] = {
@@ -278,7 +631,7 @@ static Selector _default = {
 /*Close fd and reset all memory and "trackers" for this connection*/
 static void reset_recvr (Recvr *r) 
 {
-	SHOWDATA( "resetting recvr structure and freeing scratch space... " );
+	//SHOWDATA( "resetting recvr structure and freeing scratch space... " );
 	memset(&r->child, 0, sizeof(Socket));
 #ifdef NW_BUFF_FIXED
 	memset(&r->request_, 0, NW_MAX_BUFFER_SIZE); 
@@ -291,10 +644,8 @@ static void reset_recvr (Recvr *r)
 	memset(&r->end, 0, sizeof(struct timespec));
 	r->rb = 0, 
 	r->sb = 0, 
-	r->error = 0, 
 	r->recvd = 0, 
 	r->sent = 0, 
-	r->len = 0, 
 	r->stage = 0;
 	r->recv_retry = 0,
 	r->send_retry = 0;
@@ -356,14 +707,14 @@ int nw_read (Recvr *r)
 
 
 
-//Write to socket - always assumes the message is ready
+//Write to socket - always assumes the message is ready (and it should be...)
 _Bool nw_write (Recvr *r) 
 {
 	//Check that you're not writing to uninitialized memory.
 	SHOWDATA( "file             %d\n", r->client->fd );	
-	SHOWDATA( "supposed length  %d\n", r->len );	
 	SHOWDATA( "actual length    %d\n", bf_written( &r->_response ));
 
+	int len = bf_written( &r->_response );
 #ifdef NW_QUEUE_WRITES
 	//This has the same failures, we don't really care...
 	int fd = 0;
@@ -377,17 +728,15 @@ _Bool nw_write (Recvr *r)
 	mkdir( NW_QUEUE_WRITE_DIRNAME, S_IRWXU );
 	if ( open( fbuf, O_CREAT | O_RDWR, S_IRWXU ) == -1 )
 		return 1;
-	if ( (r->sb = write( fd, wB, r->len - r->sent)) == -1 )
+	if ( (r->sb = write( fd, wB, len - r->sent)) == -1 )
 		return 1;
 	if ( close( fd ) == -1 )
 		return 1;
 	SHOWDATA( "%-5d bytes written to file %s\n", r->sb, fbuf);
 
 #else
-
-	//Choose a buffer to write from
-	uint8_t *wB = ( r->error ) ? r->errbuf : &r->_response.buffer[r->sent];
-	r->sb = write(r->client->fd, wB, r->len - r->sent);
+	uint8_t *wB = &r->_response.buffer[r->sent];
+	r->sb = write(r->client->fd, wB, len - r->sent);
 
 	SHOWDATA( "write() syscall returned %d\n", r->sb );
 
@@ -448,14 +797,7 @@ _Bool nw_write (Recvr *r)
 
 
 
-//Set the error descriptor
-void nw_set_error (Recvr *r) 
-{
-	r->error = 1;
-}
-
-
-//Reset file descriptor for reading
+/*Reset file descriptor for reading*/
 _Bool reset_read_fd (Recvr *r, void *ud, char *err) 
 {
 	r->client->events = POLLRDNORM;
@@ -464,7 +806,7 @@ _Bool reset_read_fd (Recvr *r, void *ud, char *err)
 
 
 
-//Reset file descriptor for writing
+/*Reset file descriptor for writing */
 _Bool reset_write_fd (Recvr *r, void *ud, char *err) 
 {
 	r->client->events = POLLWRNORM;
@@ -473,7 +815,7 @@ _Bool reset_write_fd (Recvr *r, void *ud, char *err)
 
 
 
-//Clear buffer
+/*Clear buffer*/
 _Bool reset_buffer (Recvr *r, void *ud, char *err) 
 {
 	return (memset(r->response, 0, NW_MAX_BUFFER_SIZE) != NULL);
@@ -481,7 +823,7 @@ _Bool reset_buffer (Recvr *r, void *ud, char *err)
 
 
 
-//Dummy function for certain actions
+/*A dummy function for the purposes of this tutorial*/
 static _Bool dummy (Recvr *r, void *ud, char *err) 
 {
 	return 0;
@@ -489,7 +831,7 @@ static _Bool dummy (Recvr *r, void *ud, char *err)
 
 
 
-//Close a file descriptor
+/*Close*/
 _Bool nw_close_fd (Recvr *r, void *ud, char *err) 
 {
 	return ((close(r->client->fd) != -1) && (r->client->fd = -1));
@@ -497,7 +839,7 @@ _Bool nw_close_fd (Recvr *r, void *ud, char *err)
 
 
 
-//Reset a file descriptor by closing it and resetting its accompanying Recvr structure
+/*...*/
 _Bool nw_reset_fd (Recvr *r, void *ud, char *err) 
 {
 	fprintf(stderr, "r->client is:   %p\n",  (void *)r->client);
@@ -609,13 +951,12 @@ void free_selector (Selector *s)
 
 
 
-//Display Recvr information in a columnar format
-void queue_csv (Selector *s, int count) 
+void wtf (Selector *s, int count) 
 {
 	//print a header 
 	fprintf( stderr, "\n" );
-	fprintf( stderr, "%-5s;%-5s;%-5s;%-7s;%-7s;%-7s;%-7s;%-15s;%-15s;%-15s\n",
-		"fd","recvd","sent","wlen","stage","reqLen","resLen","reqAddr","resAddr","fdAddr" );
+	fprintf( stderr, "%-5s;%-5s;%-5s;%-7s;%-7s;%-7s;%-15s;%-15s;%-15s\n",
+		"fd","recvd","sent","stage","reqLen","resLen","reqAddr","resAddr","fdAddr" );
 	fprintf( stderr, 
 		"==============================================================================================\n" );	
 
@@ -626,8 +967,8 @@ void queue_csv (Selector *s, int count)
 		Recvr *j = &s->rarr[ y ];
 SHOWDATA( "rq: => %p vs rs: => %p\n", (void *)&j->_request, (void *)&j->_response );
 		fprintf( stderr,
-			"%-5d;%-5d;%-5d;%-7d;%-7s;%-7d;%-7d;%-15p;%-15p;%-15p\n",
-			j->client->fd, j->recvd, j->sent, j->len, GETSTAGE(j->stage), 
+			"%-5d;%-5d;%-5d;%-7s;%-7d;%-7d;%-15p;%-15p;%-15p\n",
+			j->client->fd, j->recvd, j->sent, GETSTAGE(j->stage), 
 			bf_written( &j->_request ), bf_written( &j->_response ), bf_data( &j->_request ), bf_data( &j->_response ), (void *)j->client );
 	}
 }
@@ -806,15 +1147,25 @@ fprintf( stderr, "TIMEOUT CALC!!!\n" );
 		#endif
 
 
-		#ifdef NW_SKIP_PROC
-		#else
+		#ifndef NW_SKIP_PROC
 			if (NW_CALL( r->stage == NW_AT_PROC )) 
 			{
 				//Build the response, but I need to handle errors...
+
+				//The easiest way to use this is return a status
+				//If it's 0, it failed, move on
+				//If it's 1, it's good, move on
+				//If it's 2 or more, continue until something else happens
 				uhandle(NW_AT_PROC);
-				connCount ++;
-				r->stage = NW_AT_WRITE;
-				r->client->events = POLLWRNORM; 
+
+				SHOWDATA( "r->status %d\n", r->status );
+
+				/*Status of 0, means run again.*/
+				if ( r->status > 0 )
+				{
+					r->stage = NW_AT_WRITE;
+					r->client->events = POLLWRNORM;
+				}
 			#ifdef NW_QUEUE_PROCS
 				if ( maxi == 6 ) { wtf( s, maxi ); exit( 0 ); }
 			#endif
@@ -844,8 +1195,8 @@ fprintf( stderr, "TIMEOUT CALC!!!\n" );
 		
 					//Perform whatever handler
 					uhandle( NW_AT_WRITE );
-SHOWDATA( "error:         %d\n", error );
-SHOWDATA( "current stage: %s\n", GETSTAGE( r->stage ) );
+					SHOWDATA( "error:         %d\n", error );
+					SHOWDATA( "current stage: %s\n", GETSTAGE( r->stage ) );
 
 					/*Check if all data came off*/
 					if (NW_CALL( r->stage == NW_COMPLETED )) 
