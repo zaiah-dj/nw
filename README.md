@@ -1,16 +1,16 @@
-nw
-==
+tmnw
+====
 The simple network loop.
 
 
 ## Summary
-nw is a two file library for managing network messages using non-blocking sockets.
+tmnw is a two file library for managing network messages using non-blocking sockets.
 
-Libraries like libevent and libuv will outperform nw on raw speed, but nw aims to be 
+Libraries like libevent and libuv will outperform tmnw on raw speed, but tmnw aims to be 
 simpler to use than libevent or libuv by adhering to some simple goals.
 
 <ol>
-<li>Be useful with two files (nw.c and nw.h), one object (nw.o)</li>
+<li>Be useful with two files (tmnw.c and tmnw.h), one object (tmnw.o)</li>
 <li>Operate well in both single threaded and multi threaded environments</li>
 <li>Do not try to run on every Unix known to man</li>
 <li>Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)</li>
@@ -19,20 +19,20 @@ simpler to use than libevent or libuv by adhering to some simple goals.
 
 
 ## Dependencies
-nw has only one real dependency: poll().  It can be found on most Unix systems and will give you a nice level of performance right out of the box.  See `man poll` for more information.  Windows is another story.
+tmnw has only one real dependency: poll().  It can be found on most Unix systems and will give you a nice level of performance right out of the box.  See `man poll` for more information.  Windows is another story.
 
-Also, nw relies on a part of another library of mine titled 'lite'.  I have embedded the useful code within this library to stick to the two file goal above.  Eventually, not even this will be needed to get the library working.
+Also, tmnw relies on a part of another library of mine titled 'lite'.  I have embedded the useful code within this library to stick to the two file goal above.  Eventually, not even this will be needed to get the library working.
 
 
 ## Usage
 
-Using nw in your application is pretty simple. Unfortunately, I only 
+Using tmnw in your application is pretty simple. Unfortunately, I only 
 have directions for C right now, as I have not had time to test with C++.
 
 
 ### Compiling
 
-To compile `nw` for your own apps, do the following:
+To compile `tmnw` for your own apps, do the following:
 
 <p>
 <h3>Linux</h3>
@@ -41,7 +41,7 @@ To compile `nw` for your own apps, do the following:
 
 <p>
 <h3>OSX</h3>
-nw is so far untested on OSX, but it is down the pipeline as I have a Mac Mini to test with.
+tmnw is so far untested on OSX, but it is down the pipeline as I have a Mac Mini to test with.
 </p>
 
 <p>
@@ -53,7 +53,7 @@ Windows has poll() support now, but internet lore tells me this was not always t
 
 ### Example
 
-Below you can see some example code on how to actually use `nw` as a networking backend.
+Below you can see some example code on how to actually use `tmnw` as a networking backend.
 The following example shows you how to set up a TCP listener on port 2000.
 
 <ol>
@@ -95,7 +95,7 @@ Also notice that you <b>don't</b> need to check errno when using this library.  
 </pre>
 
 <p>
-NOTE: WebSockets and other bi-directional communication schemes would count as unusual in my opinion.  These protocols really <i>aren't</i> why `nw` was written.  So if that's your need, this is probably not the library you're looking for.
+NOTE: WebSockets and other bi-directional communication schemes would count as unusual in my opinion.  These protocols really <i>aren't</i> why `tmnw` was written.  So if that's your need, this is probably not the library you're looking for.
 </p>
 
 </li>
@@ -110,7 +110,7 @@ Unfortunately, we are still writing in C and zero'ing out and initializing data 
  
 <pre>
 	if (!initialize_selector(&sel, &sock))
-		return nw_err(&sel);
+		return tmnw_err(&sel);
 </pre>
 </li>
 
@@ -118,12 +118,12 @@ Unfortunately, we are still writing in C and zero'ing out and initializing data 
 Start a non-blocking server loop
 
 <p>
-`nw` does not block at all.  It will never set up a blocking server no matter what you do.  Yay. 
+`tmnw` does not block at all.  It will never set up a blocking server no matter what you do.  Yay. 
 </p>
 
 <pre>
 	if (!activate_selector(&sel))
-		return nw_err(&sel);
+		return tmnw_err(&sel);
 </pre>
 </li>
 
@@ -161,7 +161,7 @@ Right, so you just wasted all of your time reading through this manual.  Good fo
 </p>
 
 <p>
-Fortunately, there is more to the story.  nw tries pretty hard to abstract the process of network communication.  To make it easy to write apps that can handle networking, nw breaks up the server loop into four distinct parts.  This way, you don't even have to write your own event loop.  You are just writing handlers that plug in to said loop at different parts of the process.
+Fortunately, there is more to the story.  tmnw tries pretty hard to abstract the process of network communication.  To make it easy to write apps that can handle networking, tmnw breaks up the server loop into four distinct parts.  This way, you don't even have to write your own event loop.  You are just writing handlers that plug in to said loop at different parts of the process.
 </p>
 
 
@@ -179,7 +179,7 @@ Fortunately, there is more to the story.  nw tries pretty hard to abstract the p
 <p>
 	In the technical sense, a handler is nothing more than a function pointer.  
 	When writing your own handlers, use the following defintion. 
-	The following snippet shows the declaration you'll need to use when binding custom actions to `nw`.
+	The following snippet shows the declaration you'll need to use when binding custom actions to `tmnw`.
 <p>
 
 <pre>
@@ -192,7 +192,7 @@ Looks pretty easy, right?  Except, what's that Recvr * thing?   Well, I'm glad y
 </p>
 
 <p>
-The Recvr structure is used by nw to keep track of the status of each request.  To keep it simple, pretty much <i>every</i> possible piece of metadata about an open socket connection is stored here.   I could go into great detail about how much data is stored here, but I'll let the code speak for me this time:
+The Recvr structure is used by tmnw to keep track of the status of each request.  To keep it simple, pretty much <i>every</i> possible piece of metadata about an open socket connection is stored here.   I could go into great detail about how much data is stored here, but I'll let the code speak for me this time:
 </p>
 
 <pre>
@@ -207,7 +207,7 @@ typedef struct {
 	//For error messages when everything may fail
   uint8_t          errbuf[NW_ERROR_BUFFER_LENGTH];  
 
-	//Notice that nw can set a size limit on received requests.
+	//Notice that tmnw can set a size limit on received requests.
 #ifdef NW_BUFF_FIXED
   uint8_t        request_[NW_MAX_BUFFER_SIZE];
   uint8_t       response_[NW_MAX_BUFFER_SIZE];
@@ -244,13 +244,13 @@ typedef struct {
 <li>
 NW_AT_READ
 <p>
-The stage immediately after nw reads a message from a client
+The stage immediately after tmnw reads a message from a client
 </p>
 </li>
 
 <li>
 NW_AT_PROC
-<p>An optional intermediate stage that nw reaches after successfully reading a  client's message.  Assumes that no further reading is needed.</p>
+<p>An optional intermediate stage that tmnw reaches after successfully reading a  client's message.  Assumes that no further reading is needed.</p>
 </li>
 
 <li>
@@ -271,7 +271,7 @@ The message is assumed to be done at this point.  You can close the file descrip
 
 Customization
 =============
-The	list of defines to change the size of nw are below:
+The	list of defines to change the size of tmnw are below:
 
 	NW_BEATDOWN_TEST - Enables some test friendly options, like stopping after
 										 a certain number of requests
