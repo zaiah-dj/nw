@@ -21,8 +21,6 @@ simpler to use than libevent or libuv by adhering to some simple goals.
 ## Dependencies
 tmnw has only one real dependency: poll().  It can be found on most Unix systems and will give you a nice level of performance right out of the box.  See `man poll` for more information.  Windows is another story.
 
-Also, tmnw relies on a part of another library of mine titled 'lite'.  I have embedded the useful code within this library to stick to the two file goal above.  Eventually, not even this will be needed to get the library working.
-
 
 ## Usage
 
