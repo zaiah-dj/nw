@@ -9,43 +9,34 @@ tmnw is a two file library for managing network messages using non-blocking sock
 Libraries like libevent and libuv will outperform tmnw on raw speed, but tmnw aims to be 
 simpler to use than libevent or libuv by adhering to some simple goals.
 
-<ol>
-<li>Be useful with two files (tmnw.c and tmnw.h), one object (tmnw.o)</li>
-<li>Operate well in both single threaded and multi threaded environments</li>
-<li>Do not try to run on every Unix known to man</li>
-<li>Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)</li>
-<li>Focus on the network (UDP and TCP, not really worried about IPC)</li>
-</ol>
+- Be useful with two files (tmnw.c and tmnw.h), one object (tmnw.o)
+- Operate well in both single threaded and multi threaded environments
+- Do not try to run on every Unix known to man
+- Allow an implementor to use callbacks to handle protocols that need to run on top of these platforms (see Usage for more details)
+- Focus on the network (UDP and TCP, not really worried about IPC)
 
 
 ## Dependencies
 tmnw has only one real dependency: poll().  It can be found on most Unix systems and will give you a nice level of performance right out of the box.  See `man poll` for more information.  Windows is another story.
 
 
-## Usage
+## Compatibility 
 
-Using tmnw in your application is pretty simple. Unfortunately, I only 
-have directions for C right now, as I have not had time to test with C++.
+At the moment, tmnw will only work in C projects.  I have simply not had the time to test with C++.
 
 
 ### Compiling
 
 To compile `tmnw` for your own apps, do the following:
 
-<p>
-<h3>Linux</h3>
+#### Linux
 <code>gcc -Wall -std=c99</code> should yield the library you need.  If you do run into any build errors, please notify me at ramar.collins@gmail.com or send me a pull request.
-</p>
 
-<p>
-<h3>OSX</h3>
+#### OSX
 tmnw is so far untested on OSX, but it is down the pipeline as I have a Mac Mini to test with.
-</p>
 
-<p>
-<h3>Windows</h3>
+#### Windows
 Windows has poll() support now, but internet lore tells me this was not always the case.  As time avails, I may look into bringing this to Windows as it could be useful for game developers.
-</p>
 
 
 
@@ -72,6 +63,7 @@ So, whenever the term Socket is read in this manual, realize that I'm not speaki
 </pre>
 </li>
 
+
 <li>
 Open a socket and bind and listen if successful
 
@@ -92,8 +84,42 @@ Also notice that you <b>don't</b> need to check errno when using this library.  
 	}
 </pre>
 
+</li>
+
+<li>
+Open the Selector structure.
+
 <p>
-NOTE: WebSockets and other bi-directional communication schemes would count as unusual in my opinion.  These protocols really <i>aren't</i> why `tmnw` was written.  So if that's your need, this is probably not the library you're looking for.
+Modern systems allow a lot of modifications to regular socket behaivor.   
+Most of that can be controlled through an abstraction called a Selector.  
+An example of this structure is here.
+</p>
+
+<pre>
+Selector  sel = {
+	.read_min   = 64, 
+	.write_min  = 64, 
+	.max_events = 1000,
+	.recv_retry = 3, 
+	.send_retry = 3, 
+	.runners    = runners, 
+	.errors     = _nw_errors,
+};
+</pre>
+
+<p>
+So, what do each of these keys actually do?
+
+keyname     | type | description
+-------     | ---- | ------------
+read_min    | 64   | Read x bytes, throwing an error if threshold is not reached. 
+write_min   | 64   | Write x bytes, throwing an error if threshold is not reached. 
+max_events  | 1000 | How many poll members should be allowed?
+recv_retry  | 3    | Times that tmnw should try to read from an open socket.
+send_retry  | 3    | Times that tmnw should try to send from an open socket.
+runners     | ??   | Array of functions used to read different points of nw's process
+errors      | ??   | Array of functions used to handle errors that occur at different parts of nw's process.
+
 </p>
 
 </li>
@@ -107,9 +133,14 @@ Unfortunately, we are still writing in C and zero'ing out and initializing data 
 </p>
  
 <pre>
-	if (!initialize_selector(&sel, &sock))
-		return tmnw_err(&sel);
+	if (!initialize_selector( &sel, &sock ))
+		return tmnw_err( &sel );
 </pre>
+
+<p>
+That first argument is something that probably warrants a little bit of an explanation.  tmnw's behavior can be controlled at the lower levels of the socket protocol via the Selector structure.  For the purposes of this introduction, I am going to use the defualt one.
+</p>
+
 </li>
 
 <li>
@@ -120,8 +151,8 @@ Start a non-blocking server loop
 </p>
 
 <pre>
-	if (!activate_selector(&sel))
-		return tmnw_err(&sel);
+	if (!activate_selector( &sel ))
+		return tmnw_err( &sel );
 </pre>
 </li>
 
